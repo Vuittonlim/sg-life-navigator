@@ -1,0 +1,292 @@
+import { useState, useRef, useEffect } from "react";
+import { Send, Loader2, RotateCcw, Sparkles } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Textarea } from "@/components/ui/textarea";
+import { useToast } from "@/hooks/use-toast";
+
+interface Message {
+  role: "user" | "assistant";
+  content: string;
+}
+
+interface ChatInterfaceProps {
+  initialPrompt?: string;
+  onReset: () => void;
+}
+
+const CHAT_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/sg-life-guide`;
+
+export const ChatInterface = ({ initialPrompt, onReset }: ChatInterfaceProps) => {
+  const [messages, setMessages] = useState<Message[]>([]);
+  const [input, setInput] = useState("");
+  const [isLoading, setIsLoading] = useState(false);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const { toast } = useToast();
+  const hasInitialized = useRef(false);
+
+  const scrollToBottom = () => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  };
+
+  useEffect(() => {
+    scrollToBottom();
+  }, [messages]);
+
+  useEffect(() => {
+    if (initialPrompt && !hasInitialized.current) {
+      hasInitialized.current = true;
+      sendMessage(initialPrompt);
+    }
+  }, [initialPrompt]);
+
+  const sendMessage = async (messageText: string) => {
+    if (!messageText.trim() || isLoading) return;
+
+    const userMessage: Message = { role: "user", content: messageText };
+    setMessages((prev) => [...prev, userMessage]);
+    setInput("");
+    setIsLoading(true);
+
+    let assistantContent = "";
+
+    try {
+      const response = await fetch(CHAT_URL, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
+        },
+        body: JSON.stringify({
+          message: messageText,
+          conversationHistory: messages,
+        }),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.error || "Failed to get response");
+      }
+
+      if (!response.body) throw new Error("No response body");
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+
+        let newlineIndex: number;
+        while ((newlineIndex = buffer.indexOf("\n")) !== -1) {
+          let line = buffer.slice(0, newlineIndex);
+          buffer = buffer.slice(newlineIndex + 1);
+
+          if (line.endsWith("\r")) line = line.slice(0, -1);
+          if (line.startsWith(":") || line.trim() === "") continue;
+          if (!line.startsWith("data: ")) continue;
+
+          const jsonStr = line.slice(6).trim();
+          if (jsonStr === "[DONE]") break;
+
+          try {
+            const parsed = JSON.parse(jsonStr);
+            const content = parsed.choices?.[0]?.delta?.content;
+            if (content) {
+              assistantContent += content;
+              setMessages((prev) => {
+                const last = prev[prev.length - 1];
+                if (last?.role === "assistant") {
+                  return prev.map((m, i) =>
+                    i === prev.length - 1 ? { ...m, content: assistantContent } : m
+                  );
+                }
+                return [...prev, { role: "assistant", content: assistantContent }];
+              });
+            }
+          } catch {
+            buffer = line + "\n" + buffer;
+            break;
+          }
+        }
+      }
+    } catch (error) {
+      console.error("Chat error:", error);
+      toast({
+        title: "Oops!",
+        description: error instanceof Error ? error.message : "Something went wrong. Please try again.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    sendMessage(input);
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      sendMessage(input);
+    }
+  };
+
+  const formatMessage = (content: string) => {
+    // Simple markdown-like formatting
+    return content
+      .split("\n")
+      .map((line, i) => {
+        // Handle numbered lists
+        if (/^\d+\.\s/.test(line)) {
+          return (
+            <div key={i} className="flex gap-2 my-1">
+              <span className="text-primary font-semibold">{line.match(/^\d+/)?.[0]}.</span>
+              <span>{line.replace(/^\d+\.\s/, "")}</span>
+            </div>
+          );
+        }
+        // Handle bullet points
+        if (/^[-•]\s/.test(line)) {
+          return (
+            <div key={i} className="flex gap-2 my-1 ml-4">
+              <span className="text-primary">•</span>
+              <span>{line.replace(/^[-•]\s/, "")}</span>
+            </div>
+          );
+        }
+        // Handle bold text with **
+        if (line.includes("**")) {
+          const parts = line.split(/\*\*(.*?)\*\*/g);
+          return (
+            <p key={i} className="my-1">
+              {parts.map((part, j) =>
+                j % 2 === 1 ? (
+                  <strong key={j} className="font-semibold text-foreground">
+                    {part}
+                  </strong>
+                ) : (
+                  part
+                )
+              )}
+            </p>
+          );
+        }
+        // Handle headings with ###
+        if (line.startsWith("### ")) {
+          return (
+            <h4 key={i} className="font-heading font-semibold text-foreground mt-4 mb-2">
+              {line.replace("### ", "")}
+            </h4>
+          );
+        }
+        if (line.startsWith("## ")) {
+          return (
+            <h3 key={i} className="font-heading font-bold text-foreground text-lg mt-4 mb-2">
+              {line.replace("## ", "")}
+            </h3>
+          );
+        }
+        // Regular paragraph
+        return line.trim() ? (
+          <p key={i} className="my-1">
+            {line}
+          </p>
+        ) : (
+          <br key={i} />
+        );
+      });
+  };
+
+  return (
+    <div className="flex flex-col h-[calc(100vh-4rem)] max-w-4xl mx-auto px-4">
+      {/* Header */}
+      <div className="flex items-center justify-between py-4 border-b border-border">
+        <div className="flex items-center gap-2">
+          <div className="w-8 h-8 rounded-lg gradient-warm flex items-center justify-center">
+            <Sparkles className="w-4 h-4 text-primary-foreground" />
+          </div>
+          <span className="font-heading font-semibold text-foreground">SG Life Guide</span>
+        </div>
+        <Button variant="ghost" size="sm" onClick={onReset}>
+          <RotateCcw className="w-4 h-4 mr-2" />
+          New Topic
+        </Button>
+      </div>
+
+      {/* Messages */}
+      <div className="flex-1 overflow-y-auto py-6 space-y-6">
+        {messages.map((message, index) => (
+          <div
+            key={index}
+            className={`flex ${message.role === "user" ? "justify-end" : "justify-start"} animate-slide-up`}
+          >
+            <div
+              className={`max-w-[85%] rounded-2xl px-5 py-4 ${
+                message.role === "user"
+                  ? "gradient-warm text-primary-foreground rounded-br-sm"
+                  : "bg-card border border-border shadow-soft rounded-bl-sm"
+              }`}
+            >
+              {message.role === "user" ? (
+                <p>{message.content}</p>
+              ) : (
+                <div className="text-foreground leading-relaxed">
+                  {formatMessage(message.content)}
+                </div>
+              )}
+            </div>
+          </div>
+        ))}
+        
+        {isLoading && messages[messages.length - 1]?.role === "user" && (
+          <div className="flex justify-start animate-slide-up">
+            <div className="bg-card border border-border rounded-2xl rounded-bl-sm px-5 py-4 shadow-soft">
+              <div className="flex items-center gap-2 text-muted-foreground">
+                <Loader2 className="w-4 h-4 animate-spin" />
+                <span>Thinking...</span>
+              </div>
+            </div>
+          </div>
+        )}
+        
+        <div ref={messagesEndRef} />
+      </div>
+
+      {/* Input */}
+      <form onSubmit={handleSubmit} className="py-4 border-t border-border">
+        <div className="flex gap-3">
+          <Textarea
+            ref={textareaRef}
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            onKeyDown={handleKeyDown}
+            placeholder="Ask about any life situation in Singapore..."
+            className="min-h-[52px] max-h-32 resize-none rounded-xl border-border focus:border-primary"
+            disabled={isLoading}
+          />
+          <Button
+            type="submit"
+            size="icon"
+            className="h-[52px] w-[52px] rounded-xl shrink-0"
+            disabled={!input.trim() || isLoading}
+          >
+            {isLoading ? (
+              <Loader2 className="w-5 h-5 animate-spin" />
+            ) : (
+              <Send className="w-5 h-5" />
+            )}
+          </Button>
+        </div>
+        <p className="text-xs text-muted-foreground mt-2 text-center">
+          Press Enter to send, Shift+Enter for new line
+        </p>
+      </form>
+    </div>
+  );
+};
