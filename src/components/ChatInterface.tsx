@@ -1,8 +1,9 @@
 import { useState, useRef, useEffect } from "react";
-import { Send, Loader2, RotateCcw, Sparkles } from "lucide-react";
+import { Send, Loader2, RotateCcw, Sparkles, User, LogOut } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
+import { useUser, SingpassUserProfile } from "@/contexts/UserContext";
 
 interface Message {
   role: "user" | "assistant";
@@ -16,6 +17,47 @@ interface ChatInterfaceProps {
 
 const CHAT_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/sg-life-guide`;
 
+const formatUserContext = (user: SingpassUserProfile): string => {
+  return `
+USER PROFILE (from Singpass):
+- Name: ${user.name}
+- NRIC: ${user.nric}
+- Age: ${user.age} years old
+- Date of Birth: ${user.dateOfBirth}
+- Gender: ${user.gender}
+- Race: ${user.race}
+- Nationality: ${user.nationality}
+- Residential Status: ${user.residentialStatus}
+- Marital Status: ${user.maritalStatus}
+- Address: ${user.registeredAddress}, Singapore ${user.postalCode}
+
+HOUSING:
+- HDB Type: ${user.hdbType}
+- Ownership Status: ${user.hdbOwnership}
+
+EMPLOYMENT:
+- Status: ${user.employmentStatus}
+- Occupation: ${user.occupation}
+- Employer: ${user.employer}
+- Sector: ${user.employmentSector}
+- Monthly Income: S$${user.monthlyIncome.toLocaleString()}
+
+EDUCATION:
+- Highest Qualification: ${user.highestEducation}
+
+CPF:
+- Contribution History: ${user.cpfContributionHistory}
+- Ordinary Account: S$${user.cpfOrdinaryAccount.toLocaleString()}
+- Special Account: S$${user.cpfSpecialAccount.toLocaleString()}
+- MediSave Account: S$${user.cpfMediSaveAccount.toLocaleString()}
+
+NS STATUS: ${user.nsStatus || "N/A"}
+${user.nsMrcDate ? `- MR Cycle Date: ${user.nsMrcDate}` : ""}
+
+VEHICLE: ${user.vehicleOwnership ? user.vehicleDetails : "Does not own a vehicle"}
+`.trim();
+};
+
 export const ChatInterface = ({ initialPrompt, onReset }: ChatInterfaceProps) => {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
@@ -24,6 +66,7 @@ export const ChatInterface = ({ initialPrompt, onReset }: ChatInterfaceProps) =>
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const { toast } = useToast();
   const hasInitialized = useRef(false);
+  const { user, isLoggedIn, logout } = useUser();
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -50,6 +93,9 @@ export const ChatInterface = ({ initialPrompt, onReset }: ChatInterfaceProps) =>
 
     let assistantContent = "";
 
+    // Prepare user context if logged in
+    const userContext = user ? formatUserContext(user) : null;
+
     try {
       const response = await fetch(CHAT_URL, {
         method: "POST",
@@ -60,6 +106,7 @@ export const ChatInterface = ({ initialPrompt, onReset }: ChatInterfaceProps) =>
         body: JSON.stringify({
           message: messageText,
           conversationHistory: messages,
+          userContext,
         }),
       });
 
@@ -212,11 +259,24 @@ export const ChatInterface = ({ initialPrompt, onReset }: ChatInterfaceProps) =>
             <Sparkles className="w-4 h-4 text-primary-foreground" />
           </div>
           <span className="font-heading font-semibold text-foreground">SG Life Guide</span>
+          {isLoggedIn && user && (
+            <span className="ml-2 px-2 py-1 text-xs rounded-full bg-green-100 dark:bg-green-900/20 text-green-700 dark:text-green-400">
+              {user.name.split(" ")[0]}
+            </span>
+          )}
         </div>
-        <Button variant="ghost" size="sm" onClick={onReset}>
-          <RotateCcw className="w-4 h-4 mr-2" />
-          New Topic
-        </Button>
+        <div className="flex items-center gap-2">
+          {isLoggedIn && (
+            <Button variant="ghost" size="sm" onClick={logout}>
+              <LogOut className="w-4 h-4 mr-2" />
+              Logout
+            </Button>
+          )}
+          <Button variant="ghost" size="sm" onClick={onReset}>
+            <RotateCcw className="w-4 h-4 mr-2" />
+            New Topic
+          </Button>
+        </div>
       </div>
 
       {/* Messages */}
