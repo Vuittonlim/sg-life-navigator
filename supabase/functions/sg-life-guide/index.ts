@@ -42,15 +42,31 @@ serve(async (req) => {
   }
 
   try {
-    const { message, conversationHistory = [] } = await req.json();
+    const { message, conversationHistory = [], userContext } = await req.json();
     const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
     
     if (!LOVABLE_API_KEY) {
       throw new Error("LOVABLE_API_KEY is not configured");
     }
 
+    // Build system prompt with user context if available
+    let finalSystemPrompt = systemPrompt;
+    if (userContext) {
+      finalSystemPrompt = `${systemPrompt}
+
+IMPORTANT: The user has logged in with Singpass and you have access to their verified personal information. Use this context to provide highly personalised advice. Reference their specific situation (age, income, CPF, housing status, etc.) when giving recommendations. Here is their profile:
+
+${userContext}
+
+When responding:
+- Address them by their first name
+- Reference specific numbers from their profile (e.g., their CPF balance, income level)
+- Tailor advice to their exact life stage and circumstances
+- Mention schemes they specifically qualify for based on their profile`;
+    }
+
     const messages = [
-      { role: "system", content: systemPrompt },
+      { role: "system", content: finalSystemPrompt },
       ...conversationHistory,
       { role: "user", content: message }
     ];

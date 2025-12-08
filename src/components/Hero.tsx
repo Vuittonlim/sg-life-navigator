@@ -1,11 +1,21 @@
-import { ArrowRight, MapPin, Users, Sparkles } from "lucide-react";
+import { useState } from "react";
+import { ArrowRight, MapPin, Users, Sparkles, LogIn } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { SingpassLoginModal } from "@/components/SingpassLoginModal";
+import { useUser } from "@/contexts/UserContext";
 
 interface HeroProps {
   onGetStarted: () => void;
 }
 
 export const Hero = ({ onGetStarted }: HeroProps) => {
+  const [showLoginModal, setShowLoginModal] = useState(false);
+  const { isLoggedIn, user } = useUser();
+
+  const handleLoginSuccess = () => {
+    // After login, automatically start the journey
+    onGetStarted();
+  };
   return (
     <section className="relative min-h-[85vh] flex items-center justify-center px-4 py-12 gradient-hero overflow-hidden">
       {/* Background decoration */}
@@ -33,13 +43,43 @@ export const Hero = ({ onGetStarted }: HeroProps) => {
           for every life situation. No more googling for hours – just ask!
         </p>
         
-        {/* CTA Button */}
-        <div className="pt-4 animate-fade-up" style={{ animationDelay: "0.3s" }}>
-          <Button variant="hero" size="xl" onClick={onGetStarted}>
-            Start Your Journey
-            <ArrowRight className="w-5 h-5" />
-          </Button>
+        {/* CTA Buttons */}
+        <div className="pt-4 flex flex-col sm:flex-row gap-4 justify-center animate-fade-up" style={{ animationDelay: "0.3s" }}>
+          {isLoggedIn ? (
+            <>
+              <div className="flex items-center gap-2 px-4 py-2 rounded-full bg-green-100 dark:bg-green-900/20 text-green-700 dark:text-green-400 text-sm font-medium">
+                <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
+                Logged in as {user?.name.split(" ")[0]}
+              </div>
+              <Button variant="hero" size="xl" onClick={onGetStarted}>
+                Start Your Journey
+                <ArrowRight className="w-5 h-5" />
+              </Button>
+            </>
+          ) : (
+            <>
+              <Button 
+                variant="outline" 
+                size="xl" 
+                onClick={() => setShowLoginModal(true)}
+                className="bg-[#CF0024] hover:bg-[#A50020] text-white border-none"
+              >
+                <LogIn className="w-5 h-5 mr-2" />
+                Login with Singpass
+              </Button>
+              <Button variant="hero" size="xl" onClick={onGetStarted}>
+                Continue as Guest
+                <ArrowRight className="w-5 h-5" />
+              </Button>
+            </>
+          )}
         </div>
+        
+        <SingpassLoginModal 
+          open={showLoginModal} 
+          onOpenChange={setShowLoginModal}
+          onSuccess={handleLoginSuccess}
+        />
         
         {/* Trust indicators */}
         <div className="pt-8 flex flex-wrap justify-center gap-8 text-muted-foreground animate-fade-up" style={{ animationDelay: "0.4s" }}>
