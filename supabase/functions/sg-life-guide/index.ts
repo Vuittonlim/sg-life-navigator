@@ -159,6 +159,73 @@ function buildRetrievedContext(context: RetrievedContext): string {
   return contextStr;
 }
 
+// SEA-LION enhancement for Southeast Asian cultural context
+async function enhanceWithSeaLion(
+  userMessage: string,
+  userContext: string | null
+): Promise<string | null> {
+  const SEALION_API_KEY = Deno.env.get("SEALION_API_KEY");
+  
+  if (!SEALION_API_KEY) {
+    console.log("SEALION_API_KEY not configured, skipping SEA-LION enhancement");
+    return null;
+  }
+
+  try {
+    console.log("Calling SEA-LION for cultural context enhancement");
+    
+    const seaLionPrompt = `You are an expert on Southeast Asian cultures, languages, and contexts, with deep knowledge of Singapore's multicultural society.
+
+Analyze the following user query and provide:
+1. Cultural context that may be relevant (Malay, Chinese, Indian, Eurasian perspectives)
+2. Any Singlish or local language nuances that should be considered
+3. Cultural sensitivities or traditions that apply
+4. Local customs, practices, or unwritten rules relevant to the query
+5. Any dialect-specific terms or concepts (Hokkien, Teochew, Cantonese, Tamil, Malay)
+
+Keep your response concise and focused on cultural insights that would help give better advice.
+
+${userContext ? `User Profile:\n${userContext}\n\n` : ""}User Query: "${userMessage}"
+
+Provide cultural context insights:`;
+
+    const response = await fetch("https://api.sea-lion.ai/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${SEALION_API_KEY}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model: "aisingapore/Llama-SEA-LION-v3.5-8B-R",
+        messages: [
+          { role: "user", content: seaLionPrompt }
+        ],
+        max_tokens: 500,
+        temperature: 0.7,
+      }),
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error("SEA-LION API error:", response.status, errorText);
+      return null;
+    }
+
+    const data = await response.json();
+    const culturalContext = data.choices?.[0]?.message?.content;
+    
+    if (culturalContext) {
+      console.log("SEA-LION cultural context retrieved, length:", culturalContext.length);
+      return culturalContext;
+    }
+    
+    return null;
+  } catch (error) {
+    console.error("SEA-LION enhancement failed:", error);
+    return null;
+  }
+}
+
 const systemPrompt = `You are "SG Life Guide" – a warm, knowledgeable AI assistant that helps people navigate life in Singapore. You speak like a helpful Singaporean friend who knows the ins and outs of living here.
 
 Your approach:
@@ -190,6 +257,12 @@ Be specific with agency names (CPF Board, HDB, MOM, MSF, etc.) and mention relev
 
 Use a friendly, slightly casual tone – it's okay to use common Singlish expressions occasionally (like "can", "lah", "one") to feel more approachable, but keep it professional.
 
+## Cultural Sensitivity:
+- Be aware of Singapore's multicultural society (Chinese, Malay, Indian, Eurasian communities)
+- Consider cultural practices when giving advice (e.g., wedding customs, religious observances, festive periods)
+- Understand local dialects and colloquialisms (Hokkien, Teochew, Cantonese, Tamil, Malay expressions)
+- Be sensitive to different community practices and traditions
+
 ## IMPORTANT - Citation Requirements:
 
 You will receive RETRIEVED INFORMATION from trusted sources. You MUST:
@@ -215,20 +288,28 @@ serve(async (req) => {
       throw new Error("LOVABLE_API_KEY is not configured");
     }
 
-    // Retrieve information using Firecrawl RAG
-    let retrievedContext: RetrievedContext = { official: [], news: [], community: [] };
+    // Run RAG retrieval and SEA-LION enhancement in parallel
+    const [retrievedContext, culturalContext] = await Promise.all([
+      retrieveInformation(message).catch(err => {
+        console.error("RAG retrieval failed:", err);
+        return { official: [], news: [], community: [] } as RetrievedContext;
+      }),
+      enhanceWithSeaLion(message, userContext).catch(err => {
+        console.error("SEA-LION failed:", err);
+        return null;
+      }),
+    ]);
+
+    // Build retrieved context string
     let retrievedContextStr = "";
-    
-    try {
-      retrievedContext = await retrieveInformation(message);
+    if (retrievedContext.official.length > 0 || retrievedContext.news.length > 0 || retrievedContext.community.length > 0) {
       retrievedContextStr = buildRetrievedContext(retrievedContext);
       console.log("Built retrieved context, length:", retrievedContextStr.length);
-    } catch (ragError) {
-      console.error("RAG retrieval failed, continuing without sources:", ragError);
-      retrievedContextStr = "\n\n## RETRIEVED INFORMATION\nUnable to retrieve sources. Please provide advice based on general knowledge and recommend users verify with official sources.\n";
+    } else {
+      retrievedContextStr = "\n\n## RETRIEVED INFORMATION\nNo sources retrieved. Provide advice based on general knowledge and recommend users verify with official sources.\n";
     }
 
-    // Build system prompt with user context and retrieved information
+    // Build system prompt with user context, cultural context, and retrieved information
     let finalSystemPrompt = systemPrompt;
     
     if (userContext) {
@@ -245,6 +326,18 @@ When responding:
 - Mention schemes they specifically qualify for based on their profile`;
     }
 
+    // Add SEA-LION cultural context if available
+    if (culturalContext) {
+      finalSystemPrompt += `
+
+## 🌏 SOUTHEAST ASIAN CULTURAL CONTEXT (from SEA-LION AI)
+Consider the following cultural insights when formulating your response:
+
+${culturalContext}
+
+Use these cultural insights to make your advice more relevant and sensitive to local customs and practices.`;
+    }
+
     // Add retrieved context to system prompt
     finalSystemPrompt += retrievedContextStr;
 
@@ -255,6 +348,7 @@ When responding:
     ];
 
     console.log("Sending request to Lovable AI with", messages.length, "messages");
+    console.log("Cultural context included:", !!culturalContext);
 
     const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
       method: "POST",
