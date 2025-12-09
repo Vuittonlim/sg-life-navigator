@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from "react";
-import { Send, Loader2, RotateCcw, Sparkles, User, LogOut } from "lucide-react";
+import { Send, Loader2, RotateCcw, Sparkles, LogOut } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
@@ -33,7 +33,7 @@ USER PROFILE (from Singpass):
 
 HOUSING:
 - HDB Type: ${user.hdbType}
-- Ownership Status: ${user.hdbOwnership}
+- HDB Ownership Status: ${user.hdbOwnership}
 
 EMPLOYMENT:
 - Status: ${user.employmentStatus}
@@ -56,6 +56,66 @@ ${user.nsMrcDate ? `- MR Cycle Date: ${user.nsMrcDate}` : ""}
 
 VEHICLE: ${user.vehicleOwnership ? user.vehicleDetails : "Does not own a vehicle"}
 `.trim();
+};
+
+// Parse markdown links and render as clickable
+const renderTextWithLinks = (text: string): React.ReactNode[] => {
+  const linkRegex = /\[([^\]]+)\]\(([^)]+)\)/g;
+  const parts: React.ReactNode[] = [];
+  let lastIndex = 0;
+  let match;
+
+  while ((match = linkRegex.exec(text)) !== null) {
+    // Add text before the link
+    if (match.index > lastIndex) {
+      parts.push(text.slice(lastIndex, match.index));
+    }
+    
+    // Add the link
+    const [, linkText, url] = match;
+    const isOfficial = url.includes("gov.sg") || url.includes("cpf.gov") || url.includes("healthhub");
+    const isNews = url.includes("channelnewsasia") || url.includes("straitstimes") || url.includes("todayonline") || url.includes("tnp.sg");
+    const isCommunity = url.includes("reddit.com") || url.includes("hardwarezone");
+    
+    let badgeClass = "source-badge-official";
+    if (isNews) badgeClass = "source-badge-news";
+    if (isCommunity) badgeClass = "source-badge-community";
+    
+    parts.push(
+      <a
+        key={match.index}
+        href={url}
+        target="_blank"
+        rel="noopener noreferrer"
+        className={`source-link ${badgeClass}`}
+      >
+        {linkText}
+      </a>
+    );
+    
+    lastIndex = match.index + match[0].length;
+  }
+  
+  // Add remaining text
+  if (lastIndex < text.length) {
+    parts.push(text.slice(lastIndex));
+  }
+  
+  return parts.length > 0 ? parts : [text];
+};
+
+// Render bold text
+const renderBoldText = (text: string): React.ReactNode[] => {
+  const parts = text.split(/\*\*(.*?)\*\*/g);
+  return parts.map((part, j) =>
+    j % 2 === 1 ? (
+      <strong key={j} className="font-semibold text-foreground">
+        {renderTextWithLinks(part)}
+      </strong>
+    ) : (
+      <span key={j}>{renderTextWithLinks(part)}</span>
+    )
+  );
 };
 
 export const ChatInterface = ({ initialPrompt, onReset }: ChatInterfaceProps) => {
@@ -185,64 +245,49 @@ export const ChatInterface = ({ initialPrompt, onReset }: ChatInterfaceProps) =>
   };
 
   const formatMessage = (content: string) => {
-    // Simple markdown-like formatting
     return content
       .split("\n")
       .map((line, i) => {
         // Handle numbered lists
         if (/^\d+\.\s/.test(line)) {
+          const number = line.match(/^\d+/)?.[0];
+          const text = line.replace(/^\d+\.\s/, "");
           return (
             <div key={i} className="flex gap-2 my-1">
-              <span className="text-primary font-semibold">{line.match(/^\d+/)?.[0]}.</span>
-              <span>{line.replace(/^\d+\.\s/, "")}</span>
+              <span className="text-primary font-semibold">{number}.</span>
+              <span>{renderBoldText(text)}</span>
             </div>
           );
         }
         // Handle bullet points
         if (/^[-•]\s/.test(line)) {
+          const text = line.replace(/^[-•]\s/, "");
           return (
             <div key={i} className="flex gap-2 my-1 ml-4">
               <span className="text-primary">•</span>
-              <span>{line.replace(/^[-•]\s/, "")}</span>
+              <span>{renderBoldText(text)}</span>
             </div>
-          );
-        }
-        // Handle bold text with **
-        if (line.includes("**")) {
-          const parts = line.split(/\*\*(.*?)\*\*/g);
-          return (
-            <p key={i} className="my-1">
-              {parts.map((part, j) =>
-                j % 2 === 1 ? (
-                  <strong key={j} className="font-semibold text-foreground">
-                    {part}
-                  </strong>
-                ) : (
-                  part
-                )
-              )}
-            </p>
           );
         }
         // Handle headings with ###
         if (line.startsWith("### ")) {
           return (
             <h4 key={i} className="font-heading font-semibold text-foreground mt-4 mb-2">
-              {line.replace("### ", "")}
+              {renderBoldText(line.replace("### ", ""))}
             </h4>
           );
         }
         if (line.startsWith("## ")) {
           return (
             <h3 key={i} className="font-heading font-bold text-foreground text-lg mt-4 mb-2">
-              {line.replace("## ", "")}
+              {renderBoldText(line.replace("## ", ""))}
             </h3>
           );
         }
-        // Regular paragraph
+        // Regular paragraph with links and bold
         return line.trim() ? (
           <p key={i} className="my-1">
-            {line}
+            {renderBoldText(line)}
           </p>
         ) : (
           <br key={i} />
@@ -309,7 +354,7 @@ export const ChatInterface = ({ initialPrompt, onReset }: ChatInterfaceProps) =>
             <div className="bg-card border border-border rounded-2xl rounded-bl-sm px-5 py-4 shadow-soft">
               <div className="flex items-center gap-2 text-muted-foreground">
                 <Loader2 className="w-4 h-4 animate-spin" />
-                <span>Thinking...</span>
+                <span>Searching official sources & generating response...</span>
               </div>
             </div>
           </div>
