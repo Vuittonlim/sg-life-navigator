@@ -4,6 +4,13 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
 import { useUser, SingpassUserProfile } from "@/contexts/UserContext";
+import { 
+  useConversation, 
+  useCreateConversation, 
+  useSaveMessage,
+  useUpdateConversationTitle,
+  Message as DbMessage 
+} from "@/hooks/useConversations";
 
 interface Message {
   role: "user" | "assistant";
@@ -12,6 +19,8 @@ interface Message {
 
 interface ChatInterfaceProps {
   initialPrompt?: string;
+  conversationId?: string | null;
+  onConversationCreated?: (id: string) => void;
   onReset: () => void;
 }
 
@@ -66,12 +75,10 @@ const renderTextWithLinks = (text: string): React.ReactNode[] => {
   let match;
 
   while ((match = linkRegex.exec(text)) !== null) {
-    // Add text before the link
     if (match.index > lastIndex) {
       parts.push(text.slice(lastIndex, match.index));
     }
     
-    // Add the link
     const [, linkText, url] = match;
     const isOfficial = url.includes("gov.sg") || url.includes("cpf.gov") || url.includes("healthhub");
     const isNews = url.includes("channelnewsasia") || url.includes("straitstimes") || url.includes("todayonline") || url.includes("tnp.sg");
@@ -96,7 +103,6 @@ const renderTextWithLinks = (text: string): React.ReactNode[] => {
     lastIndex = match.index + match[0].length;
   }
   
-  // Add remaining text
   if (lastIndex < text.length) {
     parts.push(text.slice(lastIndex));
   }
@@ -118,15 +124,27 @@ const renderBoldText = (text: string): React.ReactNode[] => {
   );
 };
 
-export const ChatInterface = ({ initialPrompt, onReset }: ChatInterfaceProps) => {
+export const ChatInterface = ({ 
+  initialPrompt, 
+  conversationId,
+  onConversationCreated,
+  onReset 
+}: ChatInterfaceProps) => {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
+  const [currentConversationId, setCurrentConversationId] = useState<string | null>(conversationId ?? null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const { toast } = useToast();
   const hasInitialized = useRef(false);
   const { user, isLoggedIn, logout } = useUser();
+
+  // Database hooks
+  const { data: savedMessages } = useConversation(currentConversationId);
+  const createConversation = useCreateConversation();
+  const saveMessage = useSaveMessage();
+  const updateTitle = useUpdateConversationTitle();
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -136,12 +154,33 @@ export const ChatInterface = ({ initialPrompt, onReset }: ChatInterfaceProps) =>
     scrollToBottom();
   }, [messages]);
 
+  // Load saved messages when conversation changes
   useEffect(() => {
-    if (initialPrompt && !hasInitialized.current) {
+    if (savedMessages && savedMessages.length > 0) {
+      const loadedMessages: Message[] = savedMessages.map((m: DbMessage) => ({
+        role: m.role as "user" | "assistant",
+        content: m.content,
+      }));
+      setMessages(loadedMessages);
+    }
+  }, [savedMessages]);
+
+  // Update current conversation ID when prop changes
+  useEffect(() => {
+    setCurrentConversationId(conversationId ?? null);
+    if (!conversationId) {
+      setMessages([]);
+      hasInitialized.current = false;
+    }
+  }, [conversationId]);
+
+  // Handle initial prompt
+  useEffect(() => {
+    if (initialPrompt && !hasInitialized.current && !conversationId) {
       hasInitialized.current = true;
       sendMessage(initialPrompt);
     }
-  }, [initialPrompt]);
+  }, [initialPrompt, conversationId]);
 
   const sendMessage = async (messageText: string) => {
     if (!messageText.trim() || isLoading) return;
@@ -152,6 +191,33 @@ export const ChatInterface = ({ initialPrompt, onReset }: ChatInterfaceProps) =>
     setIsLoading(true);
 
     let assistantContent = "";
+    let activeConversationId = currentConversationId;
+
+    // Create new conversation if needed
+    if (!activeConversationId) {
+      try {
+        const title = messageText.slice(0, 50) + (messageText.length > 50 ? "..." : "");
+        const newConversation = await createConversation.mutateAsync(title);
+        activeConversationId = newConversation.id;
+        setCurrentConversationId(newConversation.id);
+        onConversationCreated?.(newConversation.id);
+      } catch (error) {
+        console.error("Failed to create conversation:", error);
+      }
+    }
+
+    // Save user message to database
+    if (activeConversationId) {
+      try {
+        await saveMessage.mutateAsync({
+          conversationId: activeConversationId,
+          role: "user",
+          content: messageText,
+        });
+      } catch (error) {
+        console.error("Failed to save user message:", error);
+      }
+    }
 
     // Prepare user context if logged in
     const userContext = user ? formatUserContext(user) : null;
@@ -220,6 +286,19 @@ export const ChatInterface = ({ initialPrompt, onReset }: ChatInterfaceProps) =>
           }
         }
       }
+
+      // Save assistant message to database
+      if (activeConversationId && assistantContent) {
+        try {
+          await saveMessage.mutateAsync({
+            conversationId: activeConversationId,
+            role: "assistant",
+            content: assistantContent,
+          });
+        } catch (error) {
+          console.error("Failed to save assistant message:", error);
+        }
+      }
     } catch (error) {
       console.error("Chat error:", error);
       toast({
@@ -248,7 +327,6 @@ export const ChatInterface = ({ initialPrompt, onReset }: ChatInterfaceProps) =>
     return content
       .split("\n")
       .map((line, i) => {
-        // Handle numbered lists
         if (/^\d+\.\s/.test(line)) {
           const number = line.match(/^\d+/)?.[0];
           const text = line.replace(/^\d+\.\s/, "");
@@ -259,7 +337,6 @@ export const ChatInterface = ({ initialPrompt, onReset }: ChatInterfaceProps) =>
             </div>
           );
         }
-        // Handle bullet points
         if (/^[-•]\s/.test(line)) {
           const text = line.replace(/^[-•]\s/, "");
           return (
@@ -269,7 +346,6 @@ export const ChatInterface = ({ initialPrompt, onReset }: ChatInterfaceProps) =>
             </div>
           );
         }
-        // Handle headings with ###
         if (line.startsWith("### ")) {
           return (
             <h4 key={i} className="font-heading font-semibold text-foreground mt-4 mb-2">
@@ -284,7 +360,6 @@ export const ChatInterface = ({ initialPrompt, onReset }: ChatInterfaceProps) =>
             </h3>
           );
         }
-        // Regular paragraph with links and bold
         return line.trim() ? (
           <p key={i} className="my-1">
             {renderBoldText(line)}
@@ -296,7 +371,7 @@ export const ChatInterface = ({ initialPrompt, onReset }: ChatInterfaceProps) =>
   };
 
   return (
-    <div className="flex flex-col h-[calc(100vh-4rem)] max-w-4xl mx-auto px-4">
+    <div className="flex flex-col h-[calc(100vh-4rem)] max-w-4xl mx-auto px-4 w-full">
       {/* Header */}
       <div className="flex items-center justify-between py-4 border-b border-border">
         <div className="flex items-center gap-2">
@@ -319,13 +394,20 @@ export const ChatInterface = ({ initialPrompt, onReset }: ChatInterfaceProps) =>
           )}
           <Button variant="ghost" size="sm" onClick={onReset}>
             <RotateCcw className="w-4 h-4 mr-2" />
-            New Topic
+            Home
           </Button>
         </div>
       </div>
 
       {/* Messages */}
       <div className="flex-1 overflow-y-auto py-6 space-y-6">
+        {messages.length === 0 && (
+          <div className="text-center py-12 text-muted-foreground">
+            <Sparkles className="w-12 h-12 mx-auto mb-4 opacity-50" />
+            <p className="text-lg">Start a conversation</p>
+            <p className="text-sm">Ask about any life situation in Singapore</p>
+          </div>
+        )}
         {messages.map((message, index) => (
           <div
             key={index}

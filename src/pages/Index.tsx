@@ -2,36 +2,74 @@ import { useState } from "react";
 import { Hero } from "@/components/Hero";
 import { ExamplePrompts } from "@/components/ExamplePrompts";
 import { ChatInterface } from "@/components/ChatInterface";
+import { ChatHistorySidebar } from "@/components/ChatHistorySidebar";
+import { SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
 
 const Index = () => {
   const [selectedPrompt, setSelectedPrompt] = useState<string | null>(null);
   const [showChat, setShowChat] = useState(false);
+  const [selectedConversationId, setSelectedConversationId] = useState<string | null>(null);
 
   const handleGetStarted = () => {
     setShowChat(true);
-    // Scroll to chat section
+    setSelectedConversationId(null);
+    setSelectedPrompt(null);
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
 
   const handleSelectPrompt = (prompt: string) => {
     setSelectedPrompt(prompt);
+    setSelectedConversationId(null);
     setShowChat(true);
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
 
   const handleReset = () => {
     setSelectedPrompt(null);
+    setSelectedConversationId(null);
     setShowChat(false);
+  };
+
+  const handleNewChat = () => {
+    setSelectedPrompt(null);
+    setSelectedConversationId(null);
+  };
+
+  const handleSelectConversation = (id: string | null) => {
+    setSelectedConversationId(id);
+    setSelectedPrompt(null);
+    if (id) {
+      setShowChat(true);
+    }
+  };
+
+  const handleConversationCreated = (id: string) => {
+    setSelectedConversationId(id);
   };
 
   if (showChat) {
     return (
-      <main className="min-h-screen bg-background">
-        <ChatInterface 
-          initialPrompt={selectedPrompt ?? undefined} 
-          onReset={handleReset} 
-        />
-      </main>
+      <SidebarProvider>
+        <div className="min-h-screen flex w-full bg-background">
+          <ChatHistorySidebar
+            selectedConversationId={selectedConversationId}
+            onSelectConversation={handleSelectConversation}
+            onNewChat={handleNewChat}
+          />
+          <main className="flex-1 flex flex-col min-w-0">
+            <div className="h-12 flex items-center border-b border-border px-4 md:hidden">
+              <SidebarTrigger />
+            </div>
+            <ChatInterface
+              key={selectedConversationId ?? "new"}
+              initialPrompt={selectedPrompt ?? undefined}
+              conversationId={selectedConversationId}
+              onConversationCreated={handleConversationCreated}
+              onReset={handleReset}
+            />
+          </main>
+        </div>
+      </SidebarProvider>
     );
   }
 
