@@ -286,27 +286,19 @@ export const ChatInterface = ({
         });
       }
 
-      // Handle inferred preferences from user message
+      // Handle inferred preferences from user message - check header immediately
       const inferredPrefsHeader = response.headers.get("X-Inferred-Preferences");
-      let currentInferredPrefs: InferredPreference[] = [];
+      console.log("Inferred preferences header:", inferredPrefsHeader);
+      
       if (inferredPrefsHeader) {
         try {
           const inferredPrefs = JSON.parse(inferredPrefsHeader) as InferredPreference[];
-          currentInferredPrefs = inferredPrefs;
-          // Save each inferred preference
-          for (const pref of inferredPrefs) {
-            await savePreference.mutateAsync({
-              key: pref.key,
-              value: { selected: pref.value, label: pref.label },
-              source: "chat_inference",
-              confidenceLevel: "inferred",
-            });
-          }
-          // Attach inferred preferences to the last user message for inline display
+          console.log("Parsed inferred preferences:", inferredPrefs);
+          
           if (inferredPrefs.length > 0) {
+            // Immediately update the last user message with inferred preferences
             setMessages((prev) => {
               const updated = [...prev];
-              // Find the last user message and attach preferences
               for (let i = updated.length - 1; i >= 0; i--) {
                 if (updated[i].role === "user") {
                   updated[i] = { ...updated[i], inferredPreferences: inferredPrefs };
@@ -314,6 +306,22 @@ export const ChatInterface = ({
                 }
               }
               return updated;
+            });
+            
+            // Save each inferred preference to database
+            for (const pref of inferredPrefs) {
+              savePreference.mutate({
+                key: pref.key,
+                value: { selected: pref.value, label: pref.label },
+                source: "chat_inference",
+                confidenceLevel: "inferred",
+              });
+            }
+            
+            // Show toast notification
+            toast({
+              title: "Preference learned!",
+              description: `I noted that you ${inferredPrefs.map(p => p.label.toLowerCase()).join(", ")}`,
             });
           }
         } catch (e) {
