@@ -227,14 +227,26 @@ export const ChatInterface = ({
     scrollToBottom();
   }, [messages]);
 
-  // Load saved messages when conversation changes
+  // Load saved messages when conversation changes - preserve quickOptions from current state
   useEffect(() => {
     if (savedMessages && savedMessages.length > 0) {
-      const loadedMessages: Message[] = savedMessages.map((m: DbMessage) => ({
-        role: m.role as "user" | "assistant",
-        content: m.content,
-      }));
-      setMessages(loadedMessages);
+      setMessages(prevMessages => {
+        // Create a map of existing quickOptions by content for preservation
+        const quickOptionsMap = new Map<string, QuickOption[]>();
+        prevMessages.forEach(m => {
+          if (m.quickOptions && m.quickOptions.length > 0) {
+            quickOptionsMap.set(m.content, m.quickOptions);
+          }
+        });
+        
+        const loadedMessages: Message[] = savedMessages.map((m: DbMessage) => ({
+          role: m.role as "user" | "assistant",
+          content: m.content,
+          // Preserve quickOptions if they existed in previous state
+          quickOptions: quickOptionsMap.get(m.content),
+        }));
+        return loadedMessages;
+      });
     }
   }, [savedMessages]);
 
