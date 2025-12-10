@@ -624,37 +624,41 @@ export const ChatInterface = ({
               <InferredPreferenceIndicator preferences={message.inferredPreferences} />
             )}
             {/* Show quick options after assistant message - only for last assistant message */}
-            {message.role === "assistant" && message.quickOptions && message.quickOptions.length > 0 && (
-              // Only show if this is the last assistant message (check there's no later assistant message)
-              (() => {
-                const laterAssistantExists = messages.slice(index + 1).some(m => m.role === "assistant");
-                if (laterAssistantExists) return null;
-                return (
-                  <div className="flex justify-start mt-3 animate-slide-up">
-                    <div className="flex flex-wrap gap-2 max-w-[85%]">
-                      {message.quickOptions.map((option, optIndex) => (
-                        <Button
-                          key={optIndex}
-                          variant="outline"
-                          size="sm"
-                          className="rounded-full hover:bg-primary/10 hover:border-primary transition-colors text-left h-auto py-2 px-4 relative z-10"
-                          onClick={() => {
-                            console.log("Quick option clicked:", option.label);
-                            sendMessage(option.label);
-                          }}
-                          disabled={isLoading}
-                        >
-                          <div className="flex flex-col items-start">
-                            <span className="font-medium text-foreground">{option.label}</span>
-                            <span className="text-xs text-muted-foreground">{option.description}</span>
-                          </div>
-                        </Button>
-                      ))}
-                    </div>
+            {message.role === "assistant" && (() => {
+              const hasOptions = message.quickOptions && message.quickOptions.length > 0;
+              const laterAssistantExists = messages.slice(index + 1).some(m => m.role === "assistant");
+              console.log("Rendering check for message", index, { 
+                hasOptions, 
+                laterAssistantExists, 
+                quickOptions: message.quickOptions 
+              });
+              
+              if (!hasOptions || laterAssistantExists) return null;
+              
+              return (
+                <div className="flex justify-start mt-4 pb-4">
+                  <div className="flex flex-wrap gap-2 max-w-[90%]">
+                    {message.quickOptions.map((option, optIndex) => (
+                      <button
+                        key={optIndex}
+                        type="button"
+                        className="rounded-full border border-primary bg-background hover:bg-primary/10 transition-colors text-left py-3 px-5 cursor-pointer"
+                        onClick={() => {
+                          console.log("Quick option clicked:", option.label);
+                          sendMessage(option.label);
+                        }}
+                        disabled={isLoading}
+                      >
+                        <div className="flex flex-col items-start">
+                          <span className="font-medium text-foreground text-sm">{option.label}</span>
+                          <span className="text-xs text-muted-foreground">{option.description}</span>
+                        </div>
+                      </button>
+                    ))}
                   </div>
-                );
-              })()
-            )}
+                </div>
+              );
+            })()}
           </div>
         ))}
         
