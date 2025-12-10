@@ -1,1 +1,7 @@
 # SingAI
+
+This project presents a Singapore focused life guidance platform designed to simplify how individuals access reliable information about daily matters such as housing, employment, immigration, education, and public services. Information in Singapore is often scattered across multiple agencies and mixed with community experiences across forums, making it difficult for users to find clear, actionable answers. Our solution bridges this gap by combining a two-stage AI pipeline with curated, Singapore-specific data sources.
+
+A localized language model first interprets real-world inputs, including Singlish and multilingual expressions, by converting them into clear, standard English. A second model then processes the refined query using retrieval from trusted sources such as AskGov, official government sites, and reputable local news. Community insights from platforms like Reddit are optionally included but clearly marked as public opinion. The system finally produces structured guidance, recommended next steps, and transparent source references.
+
+By blending cultural understanding with factual accuracy, this platform assists residents to navigate daily life process much easily. The result is an inclusive, user-centric tool that enhances everyday decision-making and contributes to Singapore’s Smart Nation vision of creating a nation where people live meaningful and fulfilled lives enabled seamlessly by technology.
