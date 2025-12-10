@@ -421,19 +421,27 @@ export const ChatInterface = ({
 
       // Parse quick options from the final assistant content and update the message
       const { cleanContent, options } = parseQuickOptions(assistantContent);
-      if (options.length > 0) {
-        setMessages((prev) => {
-          const updated = [...prev];
-          for (let i = updated.length - 1; i >= 0; i--) {
-            if (updated[i].role === "assistant") {
-              updated[i] = { ...updated[i], content: cleanContent, quickOptions: options };
-              break;
-            }
+      console.log("Final assistant content:", assistantContent);
+      console.log("Clean content:", cleanContent);
+      console.log("Options parsed:", options);
+      
+      // Always update the message with clean content and options
+      setMessages((prev) => {
+        const updated = [...prev];
+        for (let i = updated.length - 1; i >= 0; i--) {
+          if (updated[i].role === "assistant") {
+            updated[i] = { 
+              ...updated[i], 
+              content: cleanContent, 
+              quickOptions: options.length > 0 ? options : undefined 
+            };
+            console.log("Updated message:", updated[i]);
+            break;
           }
-          return updated;
-        });
-        assistantContent = cleanContent; // Use clean content for saving
-      }
+        }
+        return updated;
+      });
+      assistantContent = cleanContent; // Use clean content for saving
 
       // Save assistant message to database
       if (activeConversationId && assistantContent) {
@@ -615,8 +623,8 @@ export const ChatInterface = ({
             {message.role === "user" && message.inferredPreferences && message.inferredPreferences.length > 0 && (
               <InferredPreferenceIndicator preferences={message.inferredPreferences} />
             )}
-            {/* Show quick options after assistant message */}
-            {message.role === "assistant" && message.quickOptions && message.quickOptions.length > 0 && !isLoading && index === messages.length - 1 && (
+            {/* Show quick options after assistant message - only for last assistant message */}
+            {message.role === "assistant" && index === messages.length - 1 && message.quickOptions && message.quickOptions.length > 0 && (
               <div className="flex justify-start mt-3 animate-slide-up">
                 <div className="flex flex-wrap gap-2 max-w-[85%]">
                   {message.quickOptions.map((option, optIndex) => (
@@ -624,12 +632,15 @@ export const ChatInterface = ({
                       key={optIndex}
                       variant="outline"
                       size="sm"
-                      className="rounded-full hover:bg-primary/10 hover:border-primary transition-colors text-left h-auto py-2"
-                      onClick={() => sendMessage(option.label)}
+                      className="rounded-full hover:bg-primary/10 hover:border-primary transition-colors text-left h-auto py-2 px-4"
+                      onClick={() => {
+                        console.log("Quick option clicked:", option.label);
+                        sendMessage(option.label);
+                      }}
                       disabled={isLoading}
                     >
                       <div className="flex flex-col items-start">
-                        <span className="font-medium">{option.label}</span>
+                        <span className="font-medium text-foreground">{option.label}</span>
                         <span className="text-xs text-muted-foreground">{option.description}</span>
                       </div>
                     </Button>
