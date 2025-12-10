@@ -331,6 +331,55 @@ Provide cultural context insights:`;
   }
 }
 
+// Preference detection - check what preferences might be helpful for the query
+function detectMissingPreferences(
+  query: string,
+  existingPreferences: string | null
+): string | null {
+  const lowerQuery = query.toLowerCase();
+  const prefs = existingPreferences?.toLowerCase() || "";
+  
+  // Map of query keywords to preference keys
+  const preferenceMap: Record<string, { keywords: string[]; key: string }> = {
+    housing_status: {
+      keywords: ["hdb", "bto", "resale", "rent", "house", "flat", "condo", "home", "move", "property"],
+      key: "housing_status"
+    },
+    budget_preference: {
+      keywords: ["budget", "cheap", "affordable", "cost", "price", "expensive", "money", "save"],
+      key: "budget_preference"
+    },
+    citizenship_status: {
+      keywords: ["pr", "citizen", "foreigner", "visa", "ep", "pass", "immigrant", "apply", "cpf"],
+      key: "citizenship_status"
+    },
+    employment_type: {
+      keywords: ["job", "work", "salary", "employ", "career", "income", "freelance", "self-employed"],
+      key: "employment_type"
+    },
+    family_status: {
+      keywords: ["married", "family", "kids", "child", "baby", "spouse", "parent", "single"],
+      key: "family_status"
+    },
+    timeline_preference: {
+      keywords: ["when", "urgent", "soon", "deadline", "time", "quickly", "asap", "plan"],
+      key: "timeline_preference"
+    }
+  };
+  
+  // Find relevant preference that's missing
+  for (const [prefKey, config] of Object.entries(preferenceMap)) {
+    const isRelevant = config.keywords.some(kw => lowerQuery.includes(kw));
+    const hasPref = prefs.includes(prefKey);
+    
+    if (isRelevant && !hasPref) {
+      return config.key;
+    }
+  }
+  
+  return null;
+}
+
 const systemPrompt = `You are "SG Life Guide" – a warm, knowledgeable AI assistant that helps people navigate life in Singapore. You speak like a helpful Singaporean friend who knows the ins and outs of living here.
 
 Your approach:
@@ -399,6 +448,12 @@ serve(async (req) => {
   try {
     const { message, conversationHistory = [], userContext, preferencesContext } = await req.json();
     const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
+    
+    // Detect missing preferences that could help personalize the response
+    const missingPreference = detectMissingPreferences(message, preferencesContext);
+    if (missingPreference) {
+      console.log("Missing preference detected:", missingPreference);
+    }
     
     if (!LOVABLE_API_KEY) {
       throw new Error("LOVABLE_API_KEY is not configured");
@@ -512,8 +567,18 @@ Use these cultural insights to make your advice more relevant and sensitive to l
       });
     }
 
+    // Add custom header with missing preference info if detected
+    const responseHeaders: Record<string, string> = {
+      ...corsHeaders,
+      "Content-Type": "text/event-stream",
+    };
+    
+    if (missingPreference) {
+      responseHeaders["X-Missing-Preference"] = missingPreference;
+    }
+
     return new Response(response.body, {
-      headers: { ...corsHeaders, "Content-Type": "text/event-stream" },
+      headers: responseHeaders,
     });
   } catch (error) {
     console.error("SG Life Guide error:", error);
