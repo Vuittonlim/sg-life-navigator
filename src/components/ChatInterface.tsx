@@ -442,6 +442,11 @@ export const ChatInterface = ({
         return updated;
       });
       assistantContent = cleanContent; // Use clean content for saving
+      
+      // Force scroll after quick options are added
+      setTimeout(() => {
+        scrollToBottom();
+      }, 100);
 
       // Save assistant message to database
       if (activeConversationId && assistantContent) {
