@@ -1,6 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import type { Json } from "@/integrations/supabase/types";
+import { useAuth } from "./useAuth";
 
 export interface UserPreference {
   id: string;
@@ -13,58 +14,55 @@ export interface UserPreference {
   updated_at: string;
 }
 
-// Get or create anonymous ID from localStorage
-export const getAnonymousId = (): string => {
-  const storageKey = "sg-life-guide-anonymous-id";
-  let id = localStorage.getItem(storageKey);
-  if (!id) {
-    id = crypto.randomUUID();
-    localStorage.setItem(storageKey, id);
-  }
-  return id;
-};
-
-// Fetch all preferences for the current anonymous user
+// Fetch all preferences for the current authenticated user
 export const usePreferences = () => {
+  const { user, isAuthenticated } = useAuth();
+  
   return useQuery({
-    queryKey: ["preferences", getAnonymousId()],
+    queryKey: ["preferences", user?.id],
     queryFn: async () => {
-      const anonymousId = getAnonymousId();
+      if (!user?.id) return [];
+      
       const { data, error } = await supabase
         .from("user_preferences")
         .select("*")
-        .eq("anonymous_id", anonymousId)
+        .eq("anonymous_id", user.id)
         .order("updated_at", { ascending: false });
 
       if (error) throw error;
       return data as UserPreference[];
     },
+    enabled: isAuthenticated && !!user?.id,
   });
 };
 
 // Get a specific preference by key
 export const usePreference = (key: string) => {
+  const { user, isAuthenticated } = useAuth();
+  
   return useQuery({
-    queryKey: ["preference", getAnonymousId(), key],
+    queryKey: ["preference", user?.id, key],
     queryFn: async () => {
-      const anonymousId = getAnonymousId();
+      if (!user?.id) return null;
+      
       const { data, error } = await supabase
         .from("user_preferences")
         .select("*")
-        .eq("anonymous_id", anonymousId)
+        .eq("anonymous_id", user.id)
         .eq("preference_key", key)
         .maybeSingle();
 
       if (error) throw error;
       return data as UserPreference | null;
     },
-    enabled: !!key,
+    enabled: isAuthenticated && !!user?.id && !!key,
   });
 };
 
 // Save or update a preference
 export const useSavePreference = () => {
   const queryClient = useQueryClient();
+  const { user } = useAuth();
 
   return useMutation({
     mutationFn: async ({
@@ -78,12 +76,13 @@ export const useSavePreference = () => {
       confidenceLevel?: string;
       source?: string;
     }) => {
-      const anonymousId = getAnonymousId();
+      if (!user?.id) throw new Error("Not authenticated");
+      
       // Check if preference exists
       const { data: existing } = await supabase
         .from("user_preferences")
         .select("id")
-        .eq("anonymous_id", anonymousId)
+        .eq("anonymous_id", user.id)
         .eq("preference_key", key)
         .maybeSingle();
 
@@ -107,7 +106,7 @@ export const useSavePreference = () => {
         const { data, error } = await supabase
           .from("user_preferences")
           .insert({
-            anonymous_id: anonymousId,
+            anonymous_id: user.id,
             preference_key: key,
             preference_value: value,
             confidence_level: confidenceLevel,
@@ -130,14 +129,16 @@ export const useSavePreference = () => {
 // Delete a preference
 export const useDeletePreference = () => {
   const queryClient = useQueryClient();
+  const { user } = useAuth();
 
   return useMutation({
     mutationFn: async (key: string) => {
-      const anonymousId = getAnonymousId();
+      if (!user?.id) throw new Error("Not authenticated");
+      
       const { error } = await supabase
         .from("user_preferences")
         .delete()
-        .eq("anonymous_id", anonymousId)
+        .eq("anonymous_id", user.id)
         .eq("preference_key", key);
 
       if (error) throw error;
@@ -152,14 +153,16 @@ export const useDeletePreference = () => {
 // Delete all preferences (for user control)
 export const useDeleteAllPreferences = () => {
   const queryClient = useQueryClient();
+  const { user } = useAuth();
 
   return useMutation({
     mutationFn: async () => {
-      const anonymousId = getAnonymousId();
+      if (!user?.id) throw new Error("Not authenticated");
+      
       const { error } = await supabase
         .from("user_preferences")
         .delete()
-        .eq("anonymous_id", anonymousId);
+        .eq("anonymous_id", user.id);
 
       if (error) throw error;
     },
@@ -171,18 +174,17 @@ export const useDeleteAllPreferences = () => {
 };
 
 // Export all preferences as JSON (PDPA compliance)
-export const exportPreferences = async (): Promise<string> => {
-  const anonymousId = getAnonymousId();
+export const exportPreferences = async (userId: string): Promise<string> => {
   const { data, error } = await supabase
     .from("user_preferences")
     .select("preference_key, preference_value, confidence_level, source, created_at, updated_at")
-    .eq("anonymous_id", anonymousId);
+    .eq("anonymous_id", userId);
 
   if (error) throw error;
 
   const exportData = {
     exported_at: new Date().toISOString(),
-    anonymous_id: anonymousId,
+    anonymous_id: userId,
     preferences: data,
   };
 
