@@ -266,6 +266,18 @@ export const ChatInterface = ({
 
       if (!response.body) throw new Error("No response body");
 
+      // Check for missing preference signal from backend
+      const missingPreference = response.headers.get("X-Missing-Preference");
+      if (missingPreference && PREFERENCE_QUESTIONS[missingPreference as keyof typeof PREFERENCE_QUESTIONS]) {
+        const prefConfig = PREFERENCE_QUESTIONS[missingPreference as keyof typeof PREFERENCE_QUESTIONS];
+        setPendingQuickReply({
+          questionKey: missingPreference,
+          question: prefConfig.question,
+          options: prefConfig.options,
+          preferenceKey: prefConfig.preferenceKey,
+        });
+      }
+
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
       let buffer = "";
@@ -331,6 +343,39 @@ export const ChatInterface = ({
       });
     } finally {
       setIsLoading(false);
+    }
+  };
+
+  // Handle quick reply selection
+  const handleQuickReplySelect = async (value: string, label: string) => {
+    if (!pendingQuickReply) return;
+    
+    // Save the preference
+    try {
+      await savePreference.mutateAsync({
+        key: pendingQuickReply.preferenceKey,
+        value: { selected: value, label },
+        source: "quick_reply",
+        confidenceLevel: "explicit",
+      });
+      
+      toast({
+        title: "Preference saved",
+        description: `Your ${pendingQuickReply.preferenceKey.replace(/_/g, " ")} has been saved.`,
+      });
+      
+      // Add user's selection as a message for context
+      const userResponse = `My ${pendingQuickReply.preferenceKey.replace(/_/g, " ")} is: ${label}`;
+      sendMessage(userResponse);
+    } catch (error) {
+      console.error("Failed to save preference:", error);
+      toast({
+        title: "Error",
+        description: "Failed to save preference. Please try again.",
+        variant: "destructive",
+      });
+    } finally {
+      setPendingQuickReply(null);
     }
   };
 
@@ -454,6 +499,20 @@ export const ChatInterface = ({
             </div>
           </div>
         ))}
+        
+        {/* Quick Reply Buttons for preference collection */}
+        {pendingQuickReply && !isLoading && (
+          <div className="flex justify-start animate-slide-up">
+            <div className="max-w-[85%] bg-card border border-border rounded-2xl rounded-bl-sm px-5 py-4 shadow-soft">
+              <QuickReplyButtons
+                question={pendingQuickReply.question}
+                options={pendingQuickReply.options}
+                onSelect={handleQuickReplySelect}
+                disabled={isLoading}
+              />
+            </div>
+          </div>
+        )}
         
         {isLoading && messages[messages.length - 1]?.role === "user" && (
           <div className="flex justify-start animate-slide-up">
