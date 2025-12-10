@@ -380,6 +380,151 @@ function detectMissingPreferences(
   return null;
 }
 
+// Infer preferences from user message content
+interface InferredPreference {
+  key: string;
+  value: string;
+  label: string;
+}
+
+function inferPreferencesFromMessage(message: string): InferredPreference[] {
+  const inferred: InferredPreference[] = [];
+  const lowerMessage = message.toLowerCase();
+
+  // Housing patterns
+  const hdbPatterns = [
+    { pattern: /\b(live|stay|staying|living)\s+(in\s+)?(a\s+)?(\d[-\s]?room)\s*(hdb|flat)?/i, extract: (m: RegExpMatchArray) => ({ value: m[4].replace(/\s+/g, "-").toLowerCase() + "-hdb", label: m[4].replace(/-/g, " ").toUpperCase() + " HDB" }) },
+    { pattern: /\b(own|bought|have)\s+(a\s+)?(\d[-\s]?room)\s*(hdb|flat)/i, extract: (m: RegExpMatchArray) => ({ value: m[3].replace(/\s+/g, "-").toLowerCase() + "-hdb-owner", label: m[3].replace(/-/g, " ").toUpperCase() + " HDB (Owner)" }) },
+    { pattern: /\brenting\s+(a\s+)?(\d[-\s]?room|hdb|condo|apartment)/i, extract: () => ({ value: "renting", label: "Renting" }) },
+    { pattern: /\b(live|stay)\s+(in\s+)?(a\s+)?condo(minium)?/i, extract: () => ({ value: "condo", label: "Condominium" }) },
+    { pattern: /\b(live|stay)\s+with\s+(my\s+)?parents/i, extract: () => ({ value: "with-parents", label: "Living with parents" }) },
+  ];
+
+  for (const { pattern, extract } of hdbPatterns) {
+    const match = message.match(pattern);
+    if (match) {
+      const result = extract(match);
+      inferred.push({ key: "housing_status", ...result });
+      break;
+    }
+  }
+
+  // Citizenship patterns
+  const citizenshipPatterns = [
+    { pattern: /\bi('m|\s+am)\s+(a\s+)?pr\b/i, value: "pr", label: "Permanent Resident" },
+    { pattern: /\bi('m|\s+am)\s+(a\s+)?permanent\s+resident/i, value: "pr", label: "Permanent Resident" },
+    { pattern: /\bi('m|\s+am)\s+(a\s+)?singapore(an)?\s+citizen/i, value: "citizen", label: "Singapore Citizen" },
+    { pattern: /\bi('m|\s+am)\s+(a\s+)?citizen/i, value: "citizen", label: "Singapore Citizen" },
+    { pattern: /\bi('m|\s+am)\s+(a\s+)?foreigner/i, value: "foreigner", label: "Foreigner" },
+    { pattern: /\bi('m|\s+am)\s+on\s+(an?\s+)?(ep|employment\s+pass)/i, value: "ep", label: "Employment Pass Holder" },
+    { pattern: /\bi('m|\s+am)\s+on\s+(an?\s+)?(s\s*pass|spass)/i, value: "spass", label: "S Pass Holder" },
+    { pattern: /\bi('m|\s+am)\s+on\s+(an?\s+)?(wp|work\s+permit)/i, value: "wp", label: "Work Permit Holder" },
+    { pattern: /\bi('m|\s+am)\s+(a\s+)?new\s+citizen/i, value: "new-citizen", label: "New Citizen" },
+  ];
+
+  for (const { pattern, value, label } of citizenshipPatterns) {
+    if (pattern.test(message)) {
+      inferred.push({ key: "citizenship_status", value, label });
+      break;
+    }
+  }
+
+  // Family status patterns
+  const familyPatterns = [
+    { pattern: /\b(i('m|\s+am)|we('re|\s+are))\s+married/i, value: "married", label: "Married" },
+    { pattern: /\bmy\s+(wife|husband|spouse)/i, value: "married", label: "Married" },
+    { pattern: /\bi('m|\s+am)\s+single/i, value: "single", label: "Single" },
+    { pattern: /\b(have|got)\s+(\d+\s+)?(kids?|child(ren)?)/i, value: "with-children", label: "With children" },
+    { pattern: /\bmy\s+(kids?|child(ren)?|son|daughter)/i, value: "with-children", label: "With children" },
+    { pattern: /\b(expecting|pregnant|having\s+a\s+baby)/i, value: "expecting", label: "Expecting" },
+    { pattern: /\bi('m|\s+am)\s+(engaged|getting\s+married)/i, value: "engaged", label: "Engaged" },
+  ];
+
+  for (const { pattern, value, label } of familyPatterns) {
+    if (pattern.test(message)) {
+      inferred.push({ key: "family_status", value, label });
+      break;
+    }
+  }
+
+  // Employment patterns
+  const employmentPatterns = [
+    { pattern: /\bi('m|\s+am)\s+(a\s+)?(freelancer|freelancing)/i, value: "freelance", label: "Freelancer" },
+    { pattern: /\bi('m|\s+am)\s+self[-\s]?employed/i, value: "self-employed", label: "Self-employed" },
+    { pattern: /\bi('m|\s+am)\s+(a\s+)?business\s+owner/i, value: "business-owner", label: "Business Owner" },
+    { pattern: /\bi('m|\s+am)\s+(currently\s+)?(unemployed|jobless|looking\s+for\s+(a\s+)?job)/i, value: "unemployed", label: "Unemployed" },
+    { pattern: /\bi('m|\s+am)\s+(a\s+)?student/i, value: "student", label: "Student" },
+    { pattern: /\bi('m|\s+am)\s+retired/i, value: "retired", label: "Retired" },
+    { pattern: /\bi\s+work\s+(at|for|in)/i, value: "employed", label: "Employed" },
+    { pattern: /\bi('m|\s+am)\s+working\s+(at|for|in|as)/i, value: "employed", label: "Employed" },
+  ];
+
+  for (const { pattern, value, label } of employmentPatterns) {
+    if (pattern.test(message)) {
+      inferred.push({ key: "employment_type", value, label });
+      break;
+    }
+  }
+
+  // Likes/interests patterns (flexible catch-all for hobbies, food, etc.)
+  const likePatterns = [
+    /\bi\s+(like|love|enjoy|prefer)\s+([^,.!?]+)/gi,
+    /\bmy\s+favo(u)?rite\s+(\w+)\s+is\s+([^,.!?]+)/gi,
+    /\bi('m|\s+am)\s+(a\s+)?(fan\s+of|into)\s+([^,.!?]+)/gi,
+  ];
+
+  for (const pattern of likePatterns) {
+    let match;
+    while ((match = pattern.exec(message)) !== null) {
+      const fullMatch = match[0];
+      // Extract the thing they like
+      const likeMatch = message.match(/\bi\s+(like|love|enjoy|prefer)\s+([^,.!?]+)/i);
+      if (likeMatch) {
+        const item = likeMatch[2].trim().toLowerCase();
+        // Skip if too short or generic
+        if (item.length > 2 && !["it", "to", "the", "this", "that"].includes(item)) {
+          inferred.push({ 
+            key: `likes_${item.replace(/\s+/g, "_").slice(0, 30)}`, 
+            value: item, 
+            label: item.charAt(0).toUpperCase() + item.slice(1) 
+          });
+        }
+      }
+      break; // Only capture first like per pattern
+    }
+  }
+
+  // Location/area patterns
+  const areaPatterns = [
+    { pattern: /\b(live|stay|staying|living|work|working)\s+(in|at|near)\s+(tampines|jurong|bedok|woodlands|yishun|ang mo kio|toa payoh|bishan|clementi|queenstown|bukit|punggol|sengkang|pasir ris|hougang|serangoon|kallang|geylang|marine parade|east coast|west coast|changi|central|orchard|bugis|chinatown|little india|harbourfront|sentosa)/i, extract: (m: RegExpMatchArray) => ({ key: m[1].toLowerCase().includes("work") ? "work_area" : "home_area", value: m[3].toLowerCase(), label: m[3].charAt(0).toUpperCase() + m[3].slice(1) }) },
+  ];
+
+  for (const { pattern, extract } of areaPatterns) {
+    const match = message.match(pattern);
+    if (match) {
+      const result = extract(match);
+      inferred.push(result);
+    }
+  }
+
+  // Budget preference patterns
+  const budgetPatterns = [
+    { pattern: /\bi('m|\s+am)\s+(on\s+a\s+)?(tight\s+)?budget/i, value: "budget-conscious", label: "Budget conscious" },
+    { pattern: /\b(looking\s+for\s+)?(cheap|affordable|budget)/i, value: "budget-conscious", label: "Budget conscious" },
+    { pattern: /\b(money|cost)\s+(is\s+)?(not|no)\s+(a\s+)?(problem|issue|concern)/i, value: "flexible", label: "Flexible budget" },
+    { pattern: /\b(willing\s+to|can)\s+(spend|pay)\s+(more|extra)/i, value: "flexible", label: "Flexible budget" },
+  ];
+
+  for (const { pattern, value, label } of budgetPatterns) {
+    if (pattern.test(message)) {
+      inferred.push({ key: "budget_preference", value, label });
+      break;
+    }
+  }
+
+  return inferred;
+}
+
 const systemPrompt = `You are "SG Life Guide" – a warm, knowledgeable AI assistant that helps people navigate life in Singapore. You speak like a helpful Singaporean friend who knows the ins and outs of living here.
 
 Your approach:
@@ -453,6 +598,12 @@ serve(async (req) => {
     const missingPreference = detectMissingPreferences(message, preferencesContext);
     if (missingPreference) {
       console.log("Missing preference detected:", missingPreference);
+    }
+    
+    // Infer preferences from the user's message
+    const inferredPreferences = inferPreferencesFromMessage(message);
+    if (inferredPreferences.length > 0) {
+      console.log("Inferred preferences:", JSON.stringify(inferredPreferences));
     }
     
     if (!LOVABLE_API_KEY) {
@@ -567,7 +718,7 @@ Use these cultural insights to make your advice more relevant and sensitive to l
       });
     }
 
-    // Add custom header with missing preference info if detected
+    // Add custom headers with preference info
     const responseHeaders: Record<string, string> = {
       ...corsHeaders,
       "Content-Type": "text/event-stream",
@@ -575,6 +726,11 @@ Use these cultural insights to make your advice more relevant and sensitive to l
     
     if (missingPreference) {
       responseHeaders["X-Missing-Preference"] = missingPreference;
+    }
+    
+    // Send inferred preferences in header (JSON encoded, limited to avoid header size issues)
+    if (inferredPreferences.length > 0) {
+      responseHeaders["X-Inferred-Preferences"] = JSON.stringify(inferredPreferences.slice(0, 5));
     }
 
     return new Response(response.body, {
