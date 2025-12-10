@@ -590,7 +590,7 @@ export const ChatInterface = ({
       </div>
 
       {/* Messages */}
-      <div className="flex-1 overflow-y-auto py-6 space-y-6">
+      <div className="flex-1 overflow-y-auto py-6 pb-24 space-y-6">
         {messages.length === 0 && (
           <div className="text-center py-12 text-muted-foreground">
             <Sparkles className="w-12 h-12 mx-auto mb-4 opacity-50" />
@@ -615,6 +615,32 @@ export const ChatInterface = ({
                 ) : (
                   <div className="text-foreground leading-relaxed">
                     {formatMessage(message.content)}
+                    {/* Quick options inside the message bubble */}
+                    {message.quickOptions && message.quickOptions.length > 0 && 
+                     !messages.slice(index + 1).some(m => m.role === "assistant") && (
+                      <div className="mt-4 pt-4 border-t border-border/50">
+                        <p className="text-sm text-muted-foreground mb-3">Quick options:</p>
+                        <div className="flex flex-wrap gap-2">
+                          {message.quickOptions.map((option, optIndex) => (
+                            <button
+                              key={optIndex}
+                              type="button"
+                              className="rounded-full border-2 border-primary bg-primary/10 hover:bg-primary/20 transition-colors text-left py-2 px-4 cursor-pointer"
+                              onClick={() => {
+                                console.log("Quick option clicked:", option.label);
+                                sendMessage(option.label);
+                              }}
+                              disabled={isLoading}
+                            >
+                              <div className="flex flex-col items-start">
+                                <span className="font-medium text-foreground text-sm">{option.label}</span>
+                                <span className="text-xs text-muted-foreground">{option.description}</span>
+                              </div>
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
@@ -623,42 +649,6 @@ export const ChatInterface = ({
             {message.role === "user" && message.inferredPreferences && message.inferredPreferences.length > 0 && (
               <InferredPreferenceIndicator preferences={message.inferredPreferences} />
             )}
-            {/* Show quick options after assistant message - only for last assistant message */}
-            {message.role === "assistant" && (() => {
-              const hasOptions = message.quickOptions && message.quickOptions.length > 0;
-              const laterAssistantExists = messages.slice(index + 1).some(m => m.role === "assistant");
-              console.log("Rendering check for message", index, { 
-                hasOptions, 
-                laterAssistantExists, 
-                quickOptions: message.quickOptions 
-              });
-              
-              if (!hasOptions || laterAssistantExists) return null;
-              
-              return (
-                <div className="flex justify-start mt-4 pb-4">
-                  <div className="flex flex-wrap gap-2 max-w-[90%]">
-                    {message.quickOptions.map((option, optIndex) => (
-                      <button
-                        key={optIndex}
-                        type="button"
-                        className="rounded-full border border-primary bg-background hover:bg-primary/10 transition-colors text-left py-3 px-5 cursor-pointer"
-                        onClick={() => {
-                          console.log("Quick option clicked:", option.label);
-                          sendMessage(option.label);
-                        }}
-                        disabled={isLoading}
-                      >
-                        <div className="flex flex-col items-start">
-                          <span className="font-medium text-foreground text-sm">{option.label}</span>
-                          <span className="text-xs text-muted-foreground">{option.description}</span>
-                        </div>
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              );
-            })()}
           </div>
         ))}
         
