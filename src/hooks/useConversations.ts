@@ -1,5 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
+import { useAuth } from "./useAuth";
 
 export interface Conversation {
   id: string;
@@ -17,35 +18,25 @@ export interface Message {
   created_at: string;
 }
 
-// Get or create anonymous ID from localStorage
-export const getAnonymousId = (): string => {
-  const storageKey = "sg_life_guide_anonymous_id";
-  let anonymousId = localStorage.getItem(storageKey);
-  
-  if (!anonymousId) {
-    anonymousId = crypto.randomUUID();
-    localStorage.setItem(storageKey, anonymousId);
-  }
-  
-  return anonymousId;
-};
-
-// Fetch all conversations for the anonymous user
+// Fetch all conversations for the authenticated user
 export const useConversations = () => {
-  const anonymousId = getAnonymousId();
+  const { user, isAuthenticated } = useAuth();
   
   return useQuery({
-    queryKey: ["conversations", anonymousId],
+    queryKey: ["conversations", user?.id],
     queryFn: async () => {
+      if (!user?.id) return [];
+      
       const { data, error } = await supabase
         .from("conversations")
         .select("*")
-        .eq("anonymous_id", anonymousId)
+        .eq("anonymous_id", user.id)
         .order("updated_at", { ascending: false });
       
       if (error) throw error;
       return data as Conversation[];
     },
+    enabled: isAuthenticated && !!user?.id,
   });
 };
 
@@ -72,13 +63,15 @@ export const useConversation = (conversationId: string | null) => {
 // Create a new conversation
 export const useCreateConversation = () => {
   const queryClient = useQueryClient();
-  const anonymousId = getAnonymousId();
+  const { user } = useAuth();
   
   return useMutation({
     mutationFn: async (title: string) => {
+      if (!user?.id) throw new Error("Not authenticated");
+      
       const { data, error } = await supabase
         .from("conversations")
-        .insert({ anonymous_id: anonymousId, title })
+        .insert({ anonymous_id: user.id, title })
         .select()
         .single();
       
@@ -86,7 +79,7 @@ export const useCreateConversation = () => {
       return data as Conversation;
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["conversations", anonymousId] });
+      queryClient.invalidateQueries({ queryKey: ["conversations", user?.id] });
     },
   });
 };
@@ -94,7 +87,7 @@ export const useCreateConversation = () => {
 // Update conversation title
 export const useUpdateConversationTitle = () => {
   const queryClient = useQueryClient();
-  const anonymousId = getAnonymousId();
+  const { user } = useAuth();
   
   return useMutation({
     mutationFn: async ({ id, title }: { id: string; title: string }) => {
@@ -109,7 +102,7 @@ export const useUpdateConversationTitle = () => {
       return data as Conversation;
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["conversations", anonymousId] });
+      queryClient.invalidateQueries({ queryKey: ["conversations", user?.id] });
     },
   });
 };
@@ -147,7 +140,7 @@ export const useSaveMessage = () => {
 // Delete a conversation
 export const useDeleteConversation = () => {
   const queryClient = useQueryClient();
-  const anonymousId = getAnonymousId();
+  const { user } = useAuth();
   
   return useMutation({
     mutationFn: async (conversationId: string) => {
@@ -160,7 +153,7 @@ export const useDeleteConversation = () => {
       return conversationId;
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["conversations", anonymousId] });
+      queryClient.invalidateQueries({ queryKey: ["conversations", user?.id] });
     },
   });
 };

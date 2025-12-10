@@ -3,6 +3,7 @@ import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+  "Access-Control-Expose-Headers": "X-Missing-Preference, X-Inferred-Preferences",
 };
 
 // Source tier definitions
@@ -380,20 +381,189 @@ function detectMissingPreferences(
   return null;
 }
 
+// Infer preferences from user message content
+interface InferredPreference {
+  key: string;
+  value: string;
+  label: string;
+}
+
+function inferPreferencesFromMessage(message: string): InferredPreference[] {
+  const inferred: InferredPreference[] = [];
+  const lowerMessage = message.toLowerCase();
+
+  // Housing patterns
+  const hdbPatterns = [
+    { pattern: /\b(live|stay|staying|living)\s+(in\s+)?(a\s+)?(\d[-\s]?room)\s*(hdb|flat)?/i, extract: (m: RegExpMatchArray) => ({ value: m[4].replace(/\s+/g, "-").toLowerCase() + "-hdb", label: m[4].replace(/-/g, " ").toUpperCase() + " HDB" }) },
+    { pattern: /\b(own|bought|have)\s+(a\s+)?(\d[-\s]?room)\s*(hdb|flat)/i, extract: (m: RegExpMatchArray) => ({ value: m[3].replace(/\s+/g, "-").toLowerCase() + "-hdb-owner", label: m[3].replace(/-/g, " ").toUpperCase() + " HDB (Owner)" }) },
+    { pattern: /\brenting\s+(a\s+)?(\d[-\s]?room|hdb|condo|apartment)/i, extract: () => ({ value: "renting", label: "Renting" }) },
+    { pattern: /\b(live|stay)\s+(in\s+)?(a\s+)?condo(minium)?/i, extract: () => ({ value: "condo", label: "Condominium" }) },
+    { pattern: /\b(live|stay)\s+with\s+(my\s+)?parents/i, extract: () => ({ value: "with-parents", label: "Living with parents" }) },
+  ];
+
+  for (const { pattern, extract } of hdbPatterns) {
+    const match = message.match(pattern);
+    if (match) {
+      const result = extract(match);
+      inferred.push({ key: "housing_status", ...result });
+      break;
+    }
+  }
+
+  // Citizenship patterns
+  const citizenshipPatterns = [
+    { pattern: /\bi('m|\s+am)\s+(a\s+)?pr\b/i, value: "pr", label: "Permanent Resident" },
+    { pattern: /\bi('m|\s+am)\s+(a\s+)?permanent\s+resident/i, value: "pr", label: "Permanent Resident" },
+    { pattern: /\bi('m|\s+am)\s+(a\s+)?singapore(an)?\s+citizen/i, value: "citizen", label: "Singapore Citizen" },
+    { pattern: /\bi('m|\s+am)\s+(a\s+)?citizen/i, value: "citizen", label: "Singapore Citizen" },
+    { pattern: /\bi('m|\s+am)\s+(a\s+)?foreigner/i, value: "foreigner", label: "Foreigner" },
+    { pattern: /\bi('m|\s+am)\s+on\s+(an?\s+)?(ep|employment\s+pass)/i, value: "ep", label: "Employment Pass Holder" },
+    { pattern: /\bi('m|\s+am)\s+on\s+(an?\s+)?(s\s*pass|spass)/i, value: "spass", label: "S Pass Holder" },
+    { pattern: /\bi('m|\s+am)\s+on\s+(an?\s+)?(wp|work\s+permit)/i, value: "wp", label: "Work Permit Holder" },
+    { pattern: /\bi('m|\s+am)\s+(a\s+)?new\s+citizen/i, value: "new-citizen", label: "New Citizen" },
+  ];
+
+  for (const { pattern, value, label } of citizenshipPatterns) {
+    if (pattern.test(message)) {
+      inferred.push({ key: "citizenship_status", value, label });
+      break;
+    }
+  }
+
+  // Family status patterns
+  const familyPatterns = [
+    { pattern: /\b(i('m|\s+am)|we('re|\s+are))\s+married/i, value: "married", label: "Married" },
+    { pattern: /\bmy\s+(wife|husband|spouse)/i, value: "married", label: "Married" },
+    { pattern: /\bi('m|\s+am)\s+single/i, value: "single", label: "Single" },
+    { pattern: /\b(have|got)\s+(\d+\s+)?(kids?|child(ren)?)/i, value: "with-children", label: "With children" },
+    { pattern: /\bmy\s+(kids?|child(ren)?|son|daughter)/i, value: "with-children", label: "With children" },
+    { pattern: /\b(expecting|pregnant|having\s+a\s+baby)/i, value: "expecting", label: "Expecting" },
+    { pattern: /\bi('m|\s+am)\s+(engaged|getting\s+married)/i, value: "engaged", label: "Engaged" },
+  ];
+
+  for (const { pattern, value, label } of familyPatterns) {
+    if (pattern.test(message)) {
+      inferred.push({ key: "family_status", value, label });
+      break;
+    }
+  }
+
+  // Employment patterns
+  const employmentPatterns = [
+    { pattern: /\bi('m|\s+am)\s+(a\s+)?(freelancer|freelancing)/i, value: "freelance", label: "Freelancer" },
+    { pattern: /\bi('m|\s+am)\s+self[-\s]?employed/i, value: "self-employed", label: "Self-employed" },
+    { pattern: /\bi('m|\s+am)\s+(a\s+)?business\s+owner/i, value: "business-owner", label: "Business Owner" },
+    { pattern: /\bi('m|\s+am)\s+(currently\s+)?(unemployed|jobless|looking\s+for\s+(a\s+)?job)/i, value: "unemployed", label: "Unemployed" },
+    { pattern: /\bi('m|\s+am)\s+(a\s+)?student/i, value: "student", label: "Student" },
+    { pattern: /\bi('m|\s+am)\s+retired/i, value: "retired", label: "Retired" },
+    { pattern: /\bi\s+work\s+(at|for|in)/i, value: "employed", label: "Employed" },
+    { pattern: /\bi('m|\s+am)\s+working\s+(at|for|in|as)/i, value: "employed", label: "Employed" },
+  ];
+
+  for (const { pattern, value, label } of employmentPatterns) {
+    if (pattern.test(message)) {
+      inferred.push({ key: "employment_type", value, label });
+      break;
+    }
+  }
+
+  // Likes/interests patterns (flexible catch-all for hobbies, food, etc.)
+  const likePatterns = [
+    /\bi\s+(like|love|enjoy|prefer|want|crave|feel like)\s+(?:to\s+eat\s+|eating\s+|some\s+)?([^,.!?]+)/gi,
+    /\bmy\s+favo(u)?rite\s+(\w+)\s+is\s+([^,.!?]+)/gi,
+    /\bi('m|\s+am)\s+(a\s+)?(fan\s+of|into|craving)\s+([^,.!?]+)/gi,
+    /\b([^,.!?]+)\s+sounds?\s+good/gi,
+  ];
+
+  // Match "I like/want X" patterns
+  const likeMatch = message.match(/\bi\s+(like|love|enjoy|prefer|want|crave|feel like)\s+(?:to\s+eat\s+|eating\s+|some\s+)?([^,.!?]+)/i);
+  if (likeMatch) {
+    const item = likeMatch[2].trim().toLowerCase();
+    if (item.length > 2 && !["it", "to", "the", "this", "that", "a", "an"].includes(item)) {
+      const cleanItem = item.replace(/\s+/g, "_").slice(0, 30);
+      inferred.push({ 
+        key: `likes_${cleanItem}`, 
+        value: item, 
+        label: `Likes ${item}` 
+      });
+    }
+  }
+
+  // Match "X sounds good" pattern
+  const soundsGoodMatch = message.match(/\b([a-zA-Z\s]+)\s+sounds?\s+good/i);
+  if (soundsGoodMatch && !likeMatch) {
+    const item = soundsGoodMatch[1].trim().toLowerCase();
+    if (item.length > 2 && !["it", "that", "this", "which"].includes(item)) {
+      const cleanItem = item.replace(/\s+/g, "_").slice(0, 30);
+      inferred.push({ 
+        key: `likes_${cleanItem}`, 
+        value: item, 
+        label: `Likes ${item}` 
+      });
+    }
+  }
+
+  // Location/area patterns
+  const areaPatterns = [
+    { pattern: /\b(live|stay|staying|living|work|working)\s+(in|at|near)\s+(tampines|jurong|bedok|woodlands|yishun|ang mo kio|toa payoh|bishan|clementi|queenstown|bukit|punggol|sengkang|pasir ris|hougang|serangoon|kallang|geylang|marine parade|east coast|west coast|changi|central|orchard|bugis|chinatown|little india|harbourfront|sentosa)/i, extract: (m: RegExpMatchArray) => ({ key: m[1].toLowerCase().includes("work") ? "work_area" : "home_area", value: m[3].toLowerCase(), label: m[3].charAt(0).toUpperCase() + m[3].slice(1) }) },
+  ];
+
+  for (const { pattern, extract } of areaPatterns) {
+    const match = message.match(pattern);
+    if (match) {
+      const result = extract(match);
+      inferred.push(result);
+    }
+  }
+
+  // Budget preference patterns
+  const budgetPatterns = [
+    { pattern: /\bi('m|\s+am)\s+(on\s+a\s+)?(tight\s+)?budget/i, value: "budget-conscious", label: "Budget conscious" },
+    { pattern: /\b(looking\s+for\s+)?(cheap|affordable|budget)/i, value: "budget-conscious", label: "Budget conscious" },
+    { pattern: /\b(money|cost)\s+(is\s+)?(not|no)\s+(a\s+)?(problem|issue|concern)/i, value: "flexible", label: "Flexible budget" },
+    { pattern: /\b(willing\s+to|can)\s+(spend|pay)\s+(more|extra)/i, value: "flexible", label: "Flexible budget" },
+  ];
+
+  for (const { pattern, value, label } of budgetPatterns) {
+    if (pattern.test(message)) {
+      inferred.push({ key: "budget_preference", value, label });
+      break;
+    }
+  }
+
+  return inferred;
+}
+
 const systemPrompt = `You are "SG Life Guide" – a warm, knowledgeable AI assistant that helps people navigate life in Singapore. You speak like a helpful Singaporean friend who knows the ins and outs of living here.
 
-Your approach:
-1. Listen to the user's life situation with empathy
-2. Understand their specific context (citizenship status, family situation, budget, timeline)
-3. Provide a personalised, step-by-step checklist of what they need to do
-4. Include practical tips, government schemes they might qualify for, and common pitfalls to avoid
+## CRITICAL: Response Style
+Keep responses SHORT and CONVERSATIONAL - aim for 2-3 short paragraphs max. Users can ask follow-up questions.
+- Do NOT provide exhaustive lists or full guides upfront
+- Give a helpful, focused answer first
+- End with a question to understand what the user wants to explore further
+- Use conversational tone, not essay format
 
-Format your responses as:
-- Start with a brief, reassuring acknowledgment of their situation
-- Provide numbered steps in a clear checklist format
-- Include estimated timeframes where applicable
-- Add "Pro tips" for insider knowledge
-- End with encouragement
+Your approach:
+1. Give a brief, direct answer to what they asked (1-2 paragraphs)
+2. Offer 2-4 specific follow-up options they can choose from
+3. Ask which direction they want to go
+
+IMPORTANT: At the end of EVERY response, include a "Quick options" section formatted EXACTLY like this:
+---QUICK_OPTIONS---
+[Option 1 label]|[Short description]
+[Option 2 label]|[Short description]  
+[Option 3 label]|[Short description]
+---END_OPTIONS---
+
+Example:
+"Wah, looking for chicken rice near Tampines? There are a few good spots! What kind of experience are you looking for?
+
+---QUICK_OPTIONS---
+Hawker style|Classic kopitiam vibes, budget-friendly
+Restaurant|Air-con comfort, can sit longer
+Best rated|Top picks regardless of price
+Near MRT|Easy to get to via public transport
+---END_OPTIONS---"
 
 You know about:
 - CPF, HDB, BTO, resale, rental procedures
@@ -440,19 +610,113 @@ You will receive RETRIEVED INFORMATION from trusted sources. You MUST:
 7. **Prioritize official sources** over news and community insights
 8. **Always include at least one official source link** when available`;
 
+// Input validation constants
+const MAX_MESSAGE_LENGTH = 5000;
+const MAX_CONVERSATION_HISTORY = 20;
+const MAX_USER_CONTEXT_LENGTH = 10000;
+const MAX_PREFERENCES_CONTEXT_LENGTH = 5000;
+
+// Sanitize string input - removes potentially dangerous characters
+function sanitizeInput(input: string): string {
+  if (typeof input !== 'string') return '';
+  // Remove null bytes and control characters except newlines/tabs
+  return input
+    .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '')
+    .trim();
+}
+
+// Validate and sanitize message content
+function validateMessage(message: unknown): { valid: boolean; sanitized: string; error?: string } {
+  if (typeof message !== 'string') {
+    return { valid: false, sanitized: '', error: 'Message must be a string' };
+  }
+  
+  const sanitized = sanitizeInput(message);
+  
+  if (sanitized.length === 0) {
+    return { valid: false, sanitized: '', error: 'Message cannot be empty' };
+  }
+  
+  if (sanitized.length > MAX_MESSAGE_LENGTH) {
+    return { valid: false, sanitized: '', error: `Message exceeds maximum length of ${MAX_MESSAGE_LENGTH} characters` };
+  }
+  
+  return { valid: true, sanitized };
+}
+
+// Validate conversation history
+function validateConversationHistory(history: unknown): { role: string; content: string }[] {
+  if (!Array.isArray(history)) return [];
+  
+  return history
+    .slice(-MAX_CONVERSATION_HISTORY) // Keep only recent messages
+    .filter((msg): msg is { role: string; content: string } => 
+      typeof msg === 'object' && 
+      msg !== null &&
+      typeof msg.role === 'string' &&
+      typeof msg.content === 'string' &&
+      ['user', 'assistant', 'system'].includes(msg.role)
+    )
+    .map(msg => ({
+      role: msg.role,
+      content: sanitizeInput(msg.content).slice(0, MAX_MESSAGE_LENGTH)
+    }));
+}
+
 serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
   }
 
   try {
-    const { message, conversationHistory = [], userContext, preferencesContext } = await req.json();
+    // Parse and validate request body
+    let body: Record<string, unknown>;
+    try {
+      body = await req.json();
+    } catch {
+      return new Response(JSON.stringify({ error: "Invalid JSON request body" }), {
+        status: 400,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    const { message, conversationHistory, userContext, preferencesContext } = body;
+    
+    // Validate message
+    const messageValidation = validateMessage(message);
+    if (!messageValidation.valid) {
+      console.log("Message validation failed:", messageValidation.error);
+      return new Response(JSON.stringify({ error: messageValidation.error }), {
+        status: 400,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+    const sanitizedMessage = messageValidation.sanitized;
+    
+    // Validate and sanitize conversation history
+    const validatedHistory = validateConversationHistory(conversationHistory);
+    
+    // Sanitize optional context strings
+    const sanitizedUserContext = typeof userContext === 'string' 
+      ? sanitizeInput(userContext).slice(0, MAX_USER_CONTEXT_LENGTH) 
+      : null;
+    const sanitizedPreferencesContext = typeof preferencesContext === 'string'
+      ? sanitizeInput(preferencesContext).slice(0, MAX_PREFERENCES_CONTEXT_LENGTH)
+      : null;
+    
+    console.log(`Request validated: message=${sanitizedMessage.length}chars, history=${validatedHistory.length}msgs`);
     const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
     
     // Detect missing preferences that could help personalize the response
-    const missingPreference = detectMissingPreferences(message, preferencesContext);
+    const missingPreference = detectMissingPreferences(sanitizedMessage, sanitizedPreferencesContext);
     if (missingPreference) {
       console.log("Missing preference detected:", missingPreference);
+    }
+    
+    // Infer preferences from the user's message
+    const inferredPreferences = inferPreferencesFromMessage(sanitizedMessage);
+    if (inferredPreferences.length > 0) {
+      console.log("Inferred preferences:", JSON.stringify(inferredPreferences));
     }
     
     if (!LOVABLE_API_KEY) {
@@ -461,11 +725,11 @@ serve(async (req) => {
 
     // Run RAG retrieval and SEA-LION enhancement in parallel
     const [retrievedContext, culturalContext] = await Promise.all([
-      retrieveInformation(message).catch(err => {
+      retrieveInformation(sanitizedMessage).catch(err => {
         console.error("RAG retrieval failed:", err);
         return { official: [], news: [], community: [], business: [] } as RetrievedContext;
       }),
-      enhanceWithSeaLion(message, userContext).catch(err => {
+      enhanceWithSeaLion(sanitizedMessage, sanitizedUserContext).catch(err => {
         console.error("SEA-LION failed:", err);
         return null;
       }),
@@ -488,12 +752,12 @@ serve(async (req) => {
     // Build system prompt with user context, cultural context, and retrieved information
     let finalSystemPrompt = systemPrompt;
     
-    if (userContext) {
+    if (sanitizedUserContext) {
       finalSystemPrompt += `
 
 IMPORTANT: The user has logged in with Singpass and you have access to their verified personal information. Use this context to provide highly personalised advice. Reference their specific situation (age, income, CPF, housing status, etc.) when giving recommendations. Here is their profile:
 
-${userContext}
+${sanitizedUserContext}
 
 When responding:
 - Address them by their first name
@@ -515,8 +779,8 @@ Use these cultural insights to make your advice more relevant and sensitive to l
     }
 
     // Add preferences context if available
-    if (preferencesContext) {
-      finalSystemPrompt += preferencesContext;
+    if (sanitizedPreferencesContext) {
+      finalSystemPrompt += sanitizedPreferencesContext;
     }
 
     // Add retrieved context to system prompt
@@ -524,8 +788,8 @@ Use these cultural insights to make your advice more relevant and sensitive to l
 
     const messages = [
       { role: "system", content: finalSystemPrompt },
-      ...conversationHistory,
-      { role: "user", content: message }
+      ...validatedHistory,
+      { role: "user", content: sanitizedMessage }
     ];
 
     console.log("Sending request to Lovable AI with", messages.length, "messages");
@@ -567,7 +831,7 @@ Use these cultural insights to make your advice more relevant and sensitive to l
       });
     }
 
-    // Add custom header with missing preference info if detected
+    // Add custom headers with preference info
     const responseHeaders: Record<string, string> = {
       ...corsHeaders,
       "Content-Type": "text/event-stream",
@@ -575,6 +839,11 @@ Use these cultural insights to make your advice more relevant and sensitive to l
     
     if (missingPreference) {
       responseHeaders["X-Missing-Preference"] = missingPreference;
+    }
+    
+    // Send inferred preferences in header (JSON encoded, limited to avoid header size issues)
+    if (inferredPreferences.length > 0) {
+      responseHeaders["X-Inferred-Preferences"] = JSON.stringify(inferredPreferences.slice(0, 5));
     }
 
     return new Response(response.body, {

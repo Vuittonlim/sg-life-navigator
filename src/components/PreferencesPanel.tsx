@@ -28,6 +28,7 @@ import {
   exportPreferences,
   UserPreference 
 } from "@/hooks/usePreferences";
+import { useAuth } from "@/hooks/useAuth";
 
 const confidenceBadgeVariant = (level: string) => {
   switch (level) {
@@ -53,6 +54,7 @@ const formatPreferenceValue = (value: unknown): string => {
 };
 
 export const PreferencesPanel = () => {
+  const { user } = useAuth();
   const { data: preferences, isLoading, refetch } = usePreferences();
   const deletePreference = useDeletePreference();
   const deleteAllPreferences = useDeleteAllPreferences();
@@ -96,9 +98,10 @@ export const PreferencesPanel = () => {
   };
 
   const handleExport = async () => {
+    if (!user?.id) return;
     setIsExporting(true);
     try {
-      const jsonData = await exportPreferences();
+      const jsonData = await exportPreferences(user.id);
       const blob = new Blob([jsonData], { type: "application/json" });
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");

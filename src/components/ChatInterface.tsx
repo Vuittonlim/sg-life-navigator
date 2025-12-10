@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
 import { useUser, SingpassUserProfile } from "@/contexts/UserContext";
+import { supabase } from "@/integrations/supabase/client";
 import { 
   useConversation, 
   useCreateConversation, 
@@ -32,6 +33,46 @@ interface QuickReplyState {
   question: string;
   options: Array<{ label: string; value: string; description?: string }>;
   preferenceKey: string;
+}
+
+// Parse quick options from AI response
+function parseQuickOptions(content: string): { cleanContent: string; options: QuickOption[] } {
+  // Try with END_OPTIONS first, then fallback to just QUICK_OPTIONS to end of content
+  let optionsMatch = content.match(/---QUICK_OPTIONS---([\s\S]*?)---END_OPTIONS---/);
+  let cleanContent = content;
+  
+  if (optionsMatch) {
+    cleanContent = content.replace(/---QUICK_OPTIONS---[\s\S]*?---END_OPTIONS---/, '').trim();
+  } else {
+    // Fallback: if no END_OPTIONS, capture everything after QUICK_OPTIONS
+    optionsMatch = content.match(/---QUICK_OPTIONS---([\s\S]*?)$/);
+    if (optionsMatch) {
+      cleanContent = content.replace(/---QUICK_OPTIONS---[\s\S]*$/, '').trim();
+    }
+  }
+  
+  if (!optionsMatch) {
+    return { cleanContent: content, options: [] };
+  }
+  
+  const optionsText = optionsMatch[1].trim();
+  const options: QuickOption[] = [];
+  
+  for (const line of optionsText.split('\n')) {
+    const trimmedLine = line.trim();
+    // Skip empty lines and the END_OPTIONS marker if present
+    if (!trimmedLine || trimmedLine === '---END_OPTIONS---') continue;
+    
+    if (trimmedLine.includes('|')) {
+      const [label, description] = trimmedLine.split('|').map(s => s.trim());
+      if (label && description) {
+        options.push({ label, description });
+      }
+    }
+  }
+  
+  console.log("Parsed quick options:", options);
+  return { cleanContent, options };
 }
 
 interface ChatInterfaceProps {
@@ -338,6 +379,49 @@ export const ChatInterface = ({
         });
       }
 
+      // Handle inferred preferences from user message - check header immediately
+      const inferredPrefsHeader = response.headers.get("X-Inferred-Preferences");
+      console.log("Inferred preferences header:", inferredPrefsHeader);
+      
+      if (inferredPrefsHeader) {
+        try {
+          const inferredPrefs = JSON.parse(inferredPrefsHeader) as InferredPreference[];
+          console.log("Parsed inferred preferences:", inferredPrefs);
+          
+          if (inferredPrefs.length > 0) {
+            // Immediately update the last user message with inferred preferences
+            setMessages((prev) => {
+              const updated = [...prev];
+              for (let i = updated.length - 1; i >= 0; i--) {
+                if (updated[i].role === "user") {
+                  updated[i] = { ...updated[i], inferredPreferences: inferredPrefs };
+                  break;
+                }
+              }
+              return updated;
+            });
+            
+            // Save each inferred preference to database
+            for (const pref of inferredPrefs) {
+              savePreference.mutate({
+                key: pref.key,
+                value: { selected: pref.value, label: pref.label },
+                source: "chat_inference",
+                confidenceLevel: "inferred",
+              });
+            }
+            
+            // Show toast notification
+            toast({
+              title: "Preference learned!",
+              description: `I noted that you ${inferredPrefs.map(p => p.label.toLowerCase()).join(", ")}`,
+            });
+          }
+        } catch (e) {
+          console.error("Failed to parse inferred preferences:", e);
+        }
+      }
+
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
       let buffer = "";
@@ -513,7 +597,14 @@ export const ChatInterface = ({
         <div className="flex items-center gap-2">
           <PreferencesPanel />
           {isLoggedIn && (
-            <Button variant="ghost" size="sm" onClick={logout}>
+            <Button variant="ghost" size="sm" onClick={async () => {
+              // Sign out from Supabase to get a fresh anonymous session
+              await supabase.auth.signOut();
+              // Clear Singpass session
+              logout();
+              // Navigate back to home
+              onReset();
+            }}>
               <LogOut className="w-4 h-4 mr-2" />
               Logout
             </Button>
@@ -526,7 +617,7 @@ export const ChatInterface = ({
       </div>
 
       {/* Messages */}
-      <div className="flex-1 overflow-y-auto py-6 space-y-6">
+      <div className="flex-1 overflow-y-auto py-6 pb-24 space-y-6">
         {messages.length === 0 && (
           <div className="text-center py-12 text-muted-foreground">
             <Sparkles className="w-12 h-12 mx-auto mb-4 opacity-50" />
@@ -573,6 +664,10 @@ export const ChatInterface = ({
                 </div>
               )}
             </div>
+            {/* Show inferred preference indicator after user message */}
+            {message.role === "user" && message.inferredPreferences && message.inferredPreferences.length > 0 && (
+              <InferredPreferenceIndicator preferences={message.inferredPreferences} />
+            )}
           </div>
         ))}
         
