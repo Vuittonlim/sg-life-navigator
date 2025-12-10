@@ -70,6 +70,39 @@ export type Database = {
           },
         ]
       }
+      user_preferences: {
+        Row: {
+          anonymous_id: string
+          confidence_level: string | null
+          created_at: string
+          id: string
+          preference_key: string
+          preference_value: Json
+          source: string | null
+          updated_at: string
+        }
+        Insert: {
+          anonymous_id: string
+          confidence_level?: string | null
+          created_at?: string
+          id?: string
+          preference_key: string
+          preference_value: Json
+          source?: string | null
+          updated_at?: string
+        }
+        Update: {
+          anonymous_id?: string
+          confidence_level?: string | null
+          created_at?: string
+          id?: string
+          preference_key?: string
+          preference_value?: Json
+          source?: string | null
+          updated_at?: string
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never

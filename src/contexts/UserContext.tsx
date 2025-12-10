@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, ReactNode } from "react";
+import { createContext, useContext, useState, useEffect, ReactNode } from "react";
 
 export interface SingpassUserProfile {
   // Personal Info
@@ -61,6 +61,8 @@ interface UserContextType {
 
 const UserContext = createContext<UserContextType | undefined>(undefined);
 
+const SESSION_STORAGE_KEY = "sg-life-guide-singpass-session";
+
 // Mock Singpass user data for Terence
 const mockSingpassUser: SingpassUserProfile = {
   // Personal Info
@@ -117,12 +119,29 @@ const mockSingpassUser: SingpassUserProfile = {
 export const UserProvider = ({ children }: { children: ReactNode }) => {
   const [user, setUser] = useState<SingpassUserProfile | null>(null);
 
+  // Check for existing session on mount
+  useEffect(() => {
+    const storedSession = sessionStorage.getItem(SESSION_STORAGE_KEY);
+    if (storedSession) {
+      try {
+        const parsed = JSON.parse(storedSession);
+        setUser(parsed);
+      } catch {
+        sessionStorage.removeItem(SESSION_STORAGE_KEY);
+      }
+    }
+  }, []);
+
   const login = () => {
     // Simulate successful Singpass login
+    // Store in sessionStorage (client-only, cleared when tab closes)
+    sessionStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(mockSingpassUser));
     setUser(mockSingpassUser);
   };
 
   const logout = () => {
+    // Clear from sessionStorage
+    sessionStorage.removeItem(SESSION_STORAGE_KEY);
     setUser(null);
   };
 
@@ -139,4 +158,9 @@ export const useUser = () => {
     throw new Error("useUser must be used within a UserProvider");
   }
   return context;
+};
+
+// Format user context for AI with brackets (not stored, sent on each request)
+export const formatSingpassContext = (user: SingpassUserProfile): string => {
+  return `[SINGPASS_USER: ${user.name}, Age: ${user.age}, Status: ${user.residentialStatus}, Housing: ${user.hdbOwnership}, Income: S$${user.monthlyIncome}, CPF-OA: S$${user.cpfOrdinaryAccount}]`;
 };

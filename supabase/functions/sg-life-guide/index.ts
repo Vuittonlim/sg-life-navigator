@@ -281,7 +281,7 @@ serve(async (req) => {
   }
 
   try {
-    const { message, conversationHistory = [], userContext } = await req.json();
+    const { message, conversationHistory = [], userContext, preferencesContext } = await req.json();
     const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
     
     if (!LOVABLE_API_KEY) {
@@ -336,6 +336,11 @@ Consider the following cultural insights when formulating your response:
 ${culturalContext}
 
 Use these cultural insights to make your advice more relevant and sensitive to local customs and practices.`;
+    }
+
+    // Add preferences context if available
+    if (preferencesContext) {
+      finalSystemPrompt += preferencesContext;
     }
 
     // Add retrieved context to system prompt
