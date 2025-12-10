@@ -469,29 +469,37 @@ function inferPreferencesFromMessage(message: string): InferredPreference[] {
 
   // Likes/interests patterns (flexible catch-all for hobbies, food, etc.)
   const likePatterns = [
-    /\bi\s+(like|love|enjoy|prefer)\s+([^,.!?]+)/gi,
+    /\bi\s+(like|love|enjoy|prefer|want|crave|feel like)\s+(?:to\s+eat\s+|eating\s+|some\s+)?([^,.!?]+)/gi,
     /\bmy\s+favo(u)?rite\s+(\w+)\s+is\s+([^,.!?]+)/gi,
-    /\bi('m|\s+am)\s+(a\s+)?(fan\s+of|into)\s+([^,.!?]+)/gi,
+    /\bi('m|\s+am)\s+(a\s+)?(fan\s+of|into|craving)\s+([^,.!?]+)/gi,
+    /\b([^,.!?]+)\s+sounds?\s+good/gi,
   ];
 
-  for (const pattern of likePatterns) {
-    let match;
-    while ((match = pattern.exec(message)) !== null) {
-      const fullMatch = match[0];
-      // Extract the thing they like
-      const likeMatch = message.match(/\bi\s+(like|love|enjoy|prefer)\s+([^,.!?]+)/i);
-      if (likeMatch) {
-        const item = likeMatch[2].trim().toLowerCase();
-        // Skip if too short or generic
-        if (item.length > 2 && !["it", "to", "the", "this", "that"].includes(item)) {
-          inferred.push({ 
-            key: `likes_${item.replace(/\s+/g, "_").slice(0, 30)}`, 
-            value: item, 
-            label: item.charAt(0).toUpperCase() + item.slice(1) 
-          });
-        }
-      }
-      break; // Only capture first like per pattern
+  // Match "I like/want X" patterns
+  const likeMatch = message.match(/\bi\s+(like|love|enjoy|prefer|want|crave|feel like)\s+(?:to\s+eat\s+|eating\s+|some\s+)?([^,.!?]+)/i);
+  if (likeMatch) {
+    const item = likeMatch[2].trim().toLowerCase();
+    if (item.length > 2 && !["it", "to", "the", "this", "that", "a", "an"].includes(item)) {
+      const cleanItem = item.replace(/\s+/g, "_").slice(0, 30);
+      inferred.push({ 
+        key: `likes_${cleanItem}`, 
+        value: item, 
+        label: `Likes ${item}` 
+      });
+    }
+  }
+
+  // Match "X sounds good" pattern
+  const soundsGoodMatch = message.match(/\b([a-zA-Z\s]+)\s+sounds?\s+good/i);
+  if (soundsGoodMatch && !likeMatch) {
+    const item = soundsGoodMatch[1].trim().toLowerCase();
+    if (item.length > 2 && !["it", "that", "this", "which"].includes(item)) {
+      const cleanItem = item.replace(/\s+/g, "_").slice(0, 30);
+      inferred.push({ 
+        key: `likes_${cleanItem}`, 
+        value: item, 
+        label: `Likes ${item}` 
+      });
     }
   }
 
