@@ -18,10 +18,18 @@ import {
 } from "@/hooks/usePreferences";
 import { QuickReplyButtons, PREFERENCE_QUESTIONS } from "@/components/QuickReplyButtons";
 import { PreferencesPanel } from "@/components/PreferencesPanel";
+import { InferredPreferenceIndicator } from "@/components/InferredPreferenceIndicator";
+
+interface InferredPreference {
+  key: string;
+  value: string;
+  label: string;
+}
 
 interface Message {
   role: "user" | "assistant";
   content: string;
+  inferredPreferences?: InferredPreference[];
 }
 
 interface QuickReplyState {
@@ -280,9 +288,11 @@ export const ChatInterface = ({
 
       // Handle inferred preferences from user message
       const inferredPrefsHeader = response.headers.get("X-Inferred-Preferences");
+      let currentInferredPrefs: InferredPreference[] = [];
       if (inferredPrefsHeader) {
         try {
-          const inferredPrefs = JSON.parse(inferredPrefsHeader) as Array<{ key: string; value: string; label: string }>;
+          const inferredPrefs = JSON.parse(inferredPrefsHeader) as InferredPreference[];
+          currentInferredPrefs = inferredPrefs;
           // Save each inferred preference
           for (const pref of inferredPrefs) {
             await savePreference.mutateAsync({
@@ -292,10 +302,18 @@ export const ChatInterface = ({
               confidenceLevel: "inferred",
             });
           }
+          // Attach inferred preferences to the last user message for inline display
           if (inferredPrefs.length > 0) {
-            toast({
-              title: "Preferences learned",
-              description: `Noted: ${inferredPrefs.map(p => p.label).join(", ")}`,
+            setMessages((prev) => {
+              const updated = [...prev];
+              // Find the last user message and attach preferences
+              for (let i = updated.length - 1; i >= 0; i--) {
+                if (updated[i].role === "user") {
+                  updated[i] = { ...updated[i], inferredPreferences: inferredPrefs };
+                  break;
+                }
+              }
+              return updated;
             });
           }
         } catch (e) {
@@ -503,25 +521,30 @@ export const ChatInterface = ({
           </div>
         )}
         {messages.map((message, index) => (
-          <div
-            key={index}
-            className={`flex ${message.role === "user" ? "justify-end" : "justify-start"} animate-slide-up`}
-          >
+          <div key={index}>
             <div
-              className={`max-w-[85%] rounded-2xl px-5 py-4 ${
-                message.role === "user"
-                  ? "gradient-warm text-primary-foreground rounded-br-sm"
-                  : "bg-card border border-border shadow-soft rounded-bl-sm"
-              }`}
+              className={`flex ${message.role === "user" ? "justify-end" : "justify-start"} animate-slide-up`}
             >
-              {message.role === "user" ? (
-                <p>{message.content}</p>
-              ) : (
-                <div className="text-foreground leading-relaxed">
-                  {formatMessage(message.content)}
-                </div>
-              )}
+              <div
+                className={`max-w-[85%] rounded-2xl px-5 py-4 ${
+                  message.role === "user"
+                    ? "gradient-warm text-primary-foreground rounded-br-sm"
+                    : "bg-card border border-border shadow-soft rounded-bl-sm"
+                }`}
+              >
+                {message.role === "user" ? (
+                  <p>{message.content}</p>
+                ) : (
+                  <div className="text-foreground leading-relaxed">
+                    {formatMessage(message.content)}
+                  </div>
+                )}
+              </div>
             </div>
+            {/* Show inferred preference indicator after user message */}
+            {message.role === "user" && message.inferredPreferences && message.inferredPreferences.length > 0 && (
+              <InferredPreferenceIndicator preferences={message.inferredPreferences} />
+            )}
           </div>
         ))}
         
