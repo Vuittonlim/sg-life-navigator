@@ -278,6 +278,31 @@ export const ChatInterface = ({
         });
       }
 
+      // Handle inferred preferences from user message
+      const inferredPrefsHeader = response.headers.get("X-Inferred-Preferences");
+      if (inferredPrefsHeader) {
+        try {
+          const inferredPrefs = JSON.parse(inferredPrefsHeader) as Array<{ key: string; value: string; label: string }>;
+          // Save each inferred preference
+          for (const pref of inferredPrefs) {
+            await savePreference.mutateAsync({
+              key: pref.key,
+              value: { selected: pref.value, label: pref.label },
+              source: "chat_inference",
+              confidenceLevel: "inferred",
+            });
+          }
+          if (inferredPrefs.length > 0) {
+            toast({
+              title: "Preferences learned",
+              description: `Noted: ${inferredPrefs.map(p => p.label).join(", ")}`,
+            });
+          }
+        } catch (e) {
+          console.error("Failed to parse inferred preferences:", e);
+        }
+      }
+
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
       let buffer = "";
