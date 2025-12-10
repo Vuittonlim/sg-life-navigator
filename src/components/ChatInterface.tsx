@@ -47,19 +47,33 @@ interface QuickReplyState {
 
 // Parse quick options from AI response
 function parseQuickOptions(content: string): { cleanContent: string; options: QuickOption[] } {
-  const optionsMatch = content.match(/---QUICK_OPTIONS---([\s\S]*?)---END_OPTIONS---/);
+  // Try with END_OPTIONS first, then fallback to just QUICK_OPTIONS to end of content
+  let optionsMatch = content.match(/---QUICK_OPTIONS---([\s\S]*?)---END_OPTIONS---/);
+  let cleanContent = content;
+  
+  if (optionsMatch) {
+    cleanContent = content.replace(/---QUICK_OPTIONS---[\s\S]*?---END_OPTIONS---/, '').trim();
+  } else {
+    // Fallback: if no END_OPTIONS, capture everything after QUICK_OPTIONS
+    optionsMatch = content.match(/---QUICK_OPTIONS---([\s\S]*?)$/);
+    if (optionsMatch) {
+      cleanContent = content.replace(/---QUICK_OPTIONS---[\s\S]*$/, '').trim();
+    }
+  }
   
   if (!optionsMatch) {
     return { cleanContent: content, options: [] };
   }
   
-  const cleanContent = content.replace(/---QUICK_OPTIONS---[\s\S]*?---END_OPTIONS---/, '').trim();
   const optionsText = optionsMatch[1].trim();
   const options: QuickOption[] = [];
   
   for (const line of optionsText.split('\n')) {
     const trimmedLine = line.trim();
-    if (trimmedLine && trimmedLine.includes('|')) {
+    // Skip empty lines and the END_OPTIONS marker if present
+    if (!trimmedLine || trimmedLine === '---END_OPTIONS---') continue;
+    
+    if (trimmedLine.includes('|')) {
       const [label, description] = trimmedLine.split('|').map(s => s.trim());
       if (label && description) {
         options.push({ label, description });
@@ -67,6 +81,7 @@ function parseQuickOptions(content: string): { cleanContent: string; options: Qu
     }
   }
   
+  console.log("Parsed quick options:", options);
   return { cleanContent, options };
 }
 
