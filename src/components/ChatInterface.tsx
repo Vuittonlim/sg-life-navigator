@@ -30,6 +30,12 @@ interface Message {
   role: "user" | "assistant";
   content: string;
   inferredPreferences?: InferredPreference[];
+  quickOptions?: QuickOption[];
+}
+
+interface QuickOption {
+  label: string;
+  description: string;
 }
 
 interface QuickReplyState {
@@ -37,6 +43,31 @@ interface QuickReplyState {
   question: string;
   options: Array<{ label: string; value: string; description?: string }>;
   preferenceKey: string;
+}
+
+// Parse quick options from AI response
+function parseQuickOptions(content: string): { cleanContent: string; options: QuickOption[] } {
+  const optionsMatch = content.match(/---QUICK_OPTIONS---([\s\S]*?)---END_OPTIONS---/);
+  
+  if (!optionsMatch) {
+    return { cleanContent: content, options: [] };
+  }
+  
+  const cleanContent = content.replace(/---QUICK_OPTIONS---[\s\S]*?---END_OPTIONS---/, '').trim();
+  const optionsText = optionsMatch[1].trim();
+  const options: QuickOption[] = [];
+  
+  for (const line of optionsText.split('\n')) {
+    const trimmedLine = line.trim();
+    if (trimmedLine && trimmedLine.includes('|')) {
+      const [label, description] = trimmedLine.split('|').map(s => s.trim());
+      if (label && description) {
+        options.push({ label, description });
+      }
+    }
+  }
+  
+  return { cleanContent, options };
 }
 
 interface ChatInterfaceProps {
@@ -373,6 +404,22 @@ export const ChatInterface = ({
         }
       }
 
+      // Parse quick options from the final assistant content and update the message
+      const { cleanContent, options } = parseQuickOptions(assistantContent);
+      if (options.length > 0) {
+        setMessages((prev) => {
+          const updated = [...prev];
+          for (let i = updated.length - 1; i >= 0; i--) {
+            if (updated[i].role === "assistant") {
+              updated[i] = { ...updated[i], content: cleanContent, quickOptions: options };
+              break;
+            }
+          }
+          return updated;
+        });
+        assistantContent = cleanContent; // Use clean content for saving
+      }
+
       // Save assistant message to database
       if (activeConversationId && assistantContent) {
         try {
@@ -552,6 +599,28 @@ export const ChatInterface = ({
             {/* Show inferred preference indicator after user message */}
             {message.role === "user" && message.inferredPreferences && message.inferredPreferences.length > 0 && (
               <InferredPreferenceIndicator preferences={message.inferredPreferences} />
+            )}
+            {/* Show quick options after assistant message */}
+            {message.role === "assistant" && message.quickOptions && message.quickOptions.length > 0 && !isLoading && index === messages.length - 1 && (
+              <div className="flex justify-start mt-3 animate-slide-up">
+                <div className="flex flex-wrap gap-2 max-w-[85%]">
+                  {message.quickOptions.map((option, optIndex) => (
+                    <Button
+                      key={optIndex}
+                      variant="outline"
+                      size="sm"
+                      className="rounded-full hover:bg-primary/10 hover:border-primary transition-colors text-left h-auto py-2"
+                      onClick={() => sendMessage(option.label)}
+                      disabled={isLoading}
+                    >
+                      <div className="flex flex-col items-start">
+                        <span className="font-medium">{option.label}</span>
+                        <span className="text-xs text-muted-foreground">{option.description}</span>
+                      </div>
+                    </Button>
+                  ))}
+                </div>
+              </div>
             )}
           </div>
         ))}
