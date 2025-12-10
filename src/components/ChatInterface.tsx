@@ -11,10 +11,24 @@ import {
   useUpdateConversationTitle,
   Message as DbMessage 
 } from "@/hooks/useConversations";
+import { 
+  usePreferences, 
+  useSavePreference,
+  getPreferencesContext 
+} from "@/hooks/usePreferences";
+import { QuickReplyButtons, PREFERENCE_QUESTIONS } from "@/components/QuickReplyButtons";
+import { PreferencesPanel } from "@/components/PreferencesPanel";
 
 interface Message {
   role: "user" | "assistant";
   content: string;
+}
+
+interface QuickReplyState {
+  questionKey: string;
+  question: string;
+  options: Array<{ label: string; value: string; description?: string }>;
+  preferenceKey: string;
 }
 
 interface ChatInterfaceProps {
@@ -139,12 +153,17 @@ export const ChatInterface = ({
   const { toast } = useToast();
   const hasInitialized = useRef(false);
   const { user, isLoggedIn, logout } = useUser();
+  const [pendingQuickReply, setPendingQuickReply] = useState<QuickReplyState | null>(null);
 
   // Database hooks
   const { data: savedMessages } = useConversation(currentConversationId);
   const createConversation = useCreateConversation();
   const saveMessage = useSaveMessage();
   const updateTitle = useUpdateConversationTitle();
+  
+  // Preferences hooks
+  const { data: preferences } = usePreferences();
+  const savePreference = useSavePreference();
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -221,6 +240,9 @@ export const ChatInterface = ({
 
     // Prepare user context if logged in
     const userContext = user ? formatUserContext(user) : null;
+    
+    // Add preferences context
+    const preferencesContext = preferences ? getPreferencesContext(preferences) : "";
 
     try {
       const response = await fetch(CHAT_URL, {
@@ -233,6 +255,7 @@ export const ChatInterface = ({
           message: messageText,
           conversationHistory: messages,
           userContext,
+          preferencesContext,
         }),
       });
 
@@ -386,6 +409,7 @@ export const ChatInterface = ({
           )}
         </div>
         <div className="flex items-center gap-2">
+          <PreferencesPanel />
           {isLoggedIn && (
             <Button variant="ghost" size="sm" onClick={logout}>
               <LogOut className="w-4 h-4 mr-2" />
