@@ -39,6 +39,20 @@ const COMMUNITY_SOURCES = [
   "hardwarezone.com.sg"
 ];
 
+// Business/location-based sources for finding stores, restaurants, services
+const BUSINESS_SOURCES = [
+  "google.com/maps",
+  "tripadvisor.com.sg",
+  "burpple.com",
+  "hungrygowhere.com",
+  "yelp.com.sg",
+  "openrice.com",
+  "timeout.com/singapore",
+  "danielfooddiary.com",
+  "sethlui.com",
+  "ladyironchef.com"
+];
+
 interface SearchResult {
   title: string;
   url: string;
@@ -49,6 +63,7 @@ interface RetrievedContext {
   official: SearchResult[];
   news: SearchResult[];
   community: SearchResult[];
+  business: SearchResult[];
 }
 
 // Search using Firecrawl
@@ -113,32 +128,122 @@ async function searchWithFirecrawl(
   }
 }
 
-// Retrieve information from all three tiers
+// Detect if query is location/business related
+function isLocationQuery(query: string): boolean {
+  const locationKeywords = [
+    "nearby", "near me", "find", "store", "shop", "restaurant", "hawker",
+    "food", "eat", "where to", "location", "address", "opening", "hours",
+    "open now", "close", "operating hours", "stall", "market", "mall",
+    "cafe", "coffee", "bubble tea", "salon", "clinic", "pharmacy",
+    "chicken rice", "laksa", "nasi lemak", "roti prata", "bak kut teh"
+  ];
+  const lowerQuery = query.toLowerCase();
+  return locationKeywords.some(keyword => lowerQuery.includes(keyword));
+}
+
+// Retrieve information from all tiers
 async function retrieveInformation(query: string): Promise<RetrievedContext> {
   console.log("Starting RAG retrieval for query:", query);
 
+  const isLocationBased = isLocationQuery(query);
+  console.log("Location-based query detected:", isLocationBased);
+
   // Run all searches in parallel
-  const [official, news, community] = await Promise.all([
+  const searchPromises: Promise<SearchResult[]>[] = [
     searchWithFirecrawl(query, OFFICIAL_SOURCES, 3),
     searchWithFirecrawl(query, NEWS_SOURCES, 2),
     searchWithFirecrawl(query, COMMUNITY_SOURCES, 2),
-  ]);
+  ];
 
-  console.log(`Retrieved: ${official.length} official, ${news.length} news, ${community.length} community sources`);
+  // Add business search for location-based queries
+  if (isLocationBased) {
+    // For location queries, search without site restrictions for better results
+    searchPromises.push(searchBusinesses(query));
+  } else {
+    searchPromises.push(Promise.resolve([]));
+  }
 
-  return { official, news, community };
+  const [official, news, community, business] = await Promise.all(searchPromises);
+
+  console.log(`Retrieved: ${official.length} official, ${news.length} news, ${community.length} community, ${business.length} business sources`);
+
+  return { official, news, community, business };
+}
+
+// Search for businesses/locations with a more open search
+async function searchBusinesses(query: string): Promise<SearchResult[]> {
+  const FIRECRAWL_API_KEY = Deno.env.get("FIRECRAWL_API_KEY");
+  
+  if (!FIRECRAWL_API_KEY) {
+    console.error("FIRECRAWL_API_KEY is not configured");
+    return [];
+  }
+
+  try {
+    // Enhanced query for Singapore locations
+    const searchQuery = `${query} Singapore opening hours address`;
+    console.log("Searching businesses:", searchQuery);
+
+    const response = await fetch("https://api.firecrawl.dev/v1/search", {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${FIRECRAWL_API_KEY}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        query: searchQuery,
+        limit: 5,
+        lang: "en",
+        country: "sg",
+        scrapeOptions: {
+          formats: ["markdown"],
+          onlyMainContent: true,
+        },
+      }),
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error("Firecrawl business search error:", response.status, errorText);
+      return [];
+    }
+
+    const data = await response.json();
+    console.log("Business search response:", JSON.stringify(data).slice(0, 500));
+
+    if (!data.success || !data.data) {
+      return [];
+    }
+
+    return data.data.map((result: any) => ({
+      title: result.title || result.url,
+      url: result.url,
+      excerpt: (result.markdown || result.description || "").slice(0, 800), // More content for business details
+    }));
+  } catch (error) {
+    console.error("Business search failed:", error);
+    return [];
+  }
 }
 
 // Build context string for the AI
 function buildRetrievedContext(context: RetrievedContext): string {
   let contextStr = "\n\n## RETRIEVED INFORMATION (Use this as primary source for your response)\n";
 
+  // Business sources first for location queries (most relevant)
+  if (context.business.length > 0) {
+    contextStr += "\n### 📍 BUSINESS/LOCATION RESULTS (Include specific store names, addresses, and hours)\n";
+    context.business.forEach((r, i) => {
+      contextStr += `\n**Result ${i + 1}: [${r.title}](${r.url})**\n${r.excerpt}\n`;
+    });
+  }
+
   if (context.official.length > 0) {
     contextStr += "\n### 🏛️ OFFICIAL GOVERNMENT SOURCES (Highest Priority - MUST cite these)\n";
     context.official.forEach((r, i) => {
       contextStr += `\n**Source ${i + 1}: [${r.title}](${r.url})**\n${r.excerpt}\n`;
     });
-  } else {
+  } else if (context.business.length === 0) {
     contextStr += "\n### 🏛️ OFFICIAL GOVERNMENT SOURCES\nNo official sources found for this query.\n";
   }
 
@@ -251,11 +356,21 @@ You know about:
 - Retirement planning
 - Rental agreements and tenant rights
 - COE, car ownership, public transport
+- Local food, restaurants, hawker centres, and places to visit
 - And all the unwritten rules of Singapore life!
 
 Be specific with agency names (CPF Board, HDB, MOM, MSF, etc.) and mention relevant online portals like Singpass, MyInfo, HDB Resale Portal.
 
 Use a friendly, slightly casual tone – it's okay to use common Singlish expressions occasionally (like "can", "lah", "one") to feel more approachable, but keep it professional.
+
+## HANDLING LOCATION/BUSINESS QUERIES:
+When users ask about finding stores, restaurants, hawker stalls, or services nearby:
+1. **Use the BUSINESS/LOCATION RESULTS** provided - cite specific store names and addresses
+2. **Include opening hours** if available from the retrieved sources
+3. **Indicate if a place is likely open today** based on operating hours (today is ${new Date().toLocaleDateString('en-SG', { weekday: 'long' })})
+4. Provide **3-5 concrete recommendations** with details when results are found
+5. Include links to sources so users can verify current information
+6. If no specific results are found, suggest using Google Maps or food apps like Burpple, HungryGoWhere
 
 ## Cultural Sensitivity:
 - Be aware of Singapore's multicultural society (Chinese, Malay, Indian, Eurasian communities)
@@ -268,12 +383,13 @@ Use a friendly, slightly casual tone – it's okay to use common Singlish expres
 You will receive RETRIEVED INFORMATION from trusted sources. You MUST:
 
 1. **Cite official sources prominently**: Format as "According to [Agency Name](URL)..." or "As stated on [Website](URL)..."
-2. **Label news sources clearly**: Use "📰 **Recent Update:** [Source Name](URL) reports that..."
-3. **Disclaimer for community sources**: Use "💬 **Community Insight** *(not official advice)*: Users on [Platform](URL) suggest..."
-4. **If no sources provided**: State "Based on general knowledge - please verify with official sources"
-5. **Keep responses concise** but well-cited with clickable links
-6. **Prioritize official sources** over news and community insights
-7. **Always include at least one official source link** when available`;
+2. **For business/location results**: Use "📍 **[Store Name](URL)** - [Address] - Opening hours: [hours]"
+3. **Label news sources clearly**: Use "📰 **Recent Update:** [Source Name](URL) reports that..."
+4. **Disclaimer for community sources**: Use "💬 **Community Insight** *(not official advice)*: Users on [Platform](URL) suggest..."
+5. **If no sources provided**: State "Based on general knowledge - please verify with official sources"
+6. **Keep responses concise** but well-cited with clickable links
+7. **Prioritize official sources** over news and community insights
+8. **Always include at least one official source link** when available`;
 
 serve(async (req) => {
   if (req.method === "OPTIONS") {
@@ -292,7 +408,7 @@ serve(async (req) => {
     const [retrievedContext, culturalContext] = await Promise.all([
       retrieveInformation(message).catch(err => {
         console.error("RAG retrieval failed:", err);
-        return { official: [], news: [], community: [] } as RetrievedContext;
+        return { official: [], news: [], community: [], business: [] } as RetrievedContext;
       }),
       enhanceWithSeaLion(message, userContext).catch(err => {
         console.error("SEA-LION failed:", err);
@@ -302,7 +418,12 @@ serve(async (req) => {
 
     // Build retrieved context string
     let retrievedContextStr = "";
-    if (retrievedContext.official.length > 0 || retrievedContext.news.length > 0 || retrievedContext.community.length > 0) {
+    const hasResults = retrievedContext.official.length > 0 || 
+                       retrievedContext.news.length > 0 || 
+                       retrievedContext.community.length > 0 ||
+                       retrievedContext.business.length > 0;
+    
+    if (hasResults) {
       retrievedContextStr = buildRetrievedContext(retrievedContext);
       console.log("Built retrieved context, length:", retrievedContextStr.length);
     } else {
