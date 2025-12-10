@@ -7,6 +7,7 @@ import {
   SidebarMenu,
   SidebarMenuButton,
   SidebarMenuItem,
+  SidebarMenuAction, // <--- ADDED THIS IMPORT
   SidebarGroup,
   SidebarGroupLabel,
   SidebarGroupContent,
@@ -124,45 +125,43 @@ export const ChatHistorySidebar = ({
                 <SidebarMenu>
                   {group.conversations.map((conv) => (
                     <SidebarMenuItem key={conv.id}>
+                      {/* 1. Main Chat Button */}
                       <SidebarMenuButton
                         onClick={() => onSelectConversation(conv.id)}
                         isActive={selectedConversationId === conv.id}
-                        className="group justify-between pr-1"
+                        className="group pr-8" // Add padding right so text doesn't hit the delete button
                       >
-                        <div className="flex items-center gap-2 min-w-0 flex-1">
-                          <MessageSquare className="w-4 h-4 shrink-0 text-muted-foreground" />
-                          <span className="truncate text-sm">{conv.title}</span>
-                        </div>
-                        <AlertDialog>
-                          <AlertDialogTrigger asChild>
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              className="h-6 w-6 opacity-0 group-hover:opacity-100 transition-opacity shrink-0"
-                              onClick={(e) => e.stopPropagation()}
-                            >
-                              <Trash2 className="w-3 h-3 text-muted-foreground hover:text-destructive" />
-                            </Button>
-                          </AlertDialogTrigger>
-                          <AlertDialogContent>
-                            <AlertDialogHeader>
-                              <AlertDialogTitle>Delete conversation?</AlertDialogTitle>
-                              <AlertDialogDescription>
-                                This will permanently delete this conversation and all its messages.
-                              </AlertDialogDescription>
-                            </AlertDialogHeader>
-                            <AlertDialogFooter>
-                              <AlertDialogCancel>Cancel</AlertDialogCancel>
-                              <AlertDialogAction
-                                onClick={() => handleDelete(conv.id)}
-                                className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-                              >
-                                Delete
-                              </AlertDialogAction>
-                            </AlertDialogFooter>
-                          </AlertDialogContent>
-                        </AlertDialog>
+                        <MessageSquare className="w-4 h-4 shrink-0 text-muted-foreground" />
+                        <span className="truncate text-sm">{conv.title}</span>
                       </SidebarMenuButton>
+
+                      {/* 2. Delete Action (Now a sibling, NOT inside the button) */}
+                      <AlertDialog>
+                        <AlertDialogTrigger asChild>
+                          <SidebarMenuAction showOnHover title="Delete Conversation">
+                            <Trash2 className="w-4 h-4" />
+                            <span className="sr-only">Delete</span>
+                          </SidebarMenuAction>
+                        </AlertDialogTrigger>
+                        <AlertDialogContent>
+                          <AlertDialogHeader>
+                            <AlertDialogTitle>Delete conversation?</AlertDialogTitle>
+                            <AlertDialogDescription>
+                              This will permanently delete this conversation and all its messages.
+                            </AlertDialogDescription>
+                          </AlertDialogHeader>
+                          <AlertDialogFooter>
+                            <AlertDialogCancel>Cancel</AlertDialogCancel>
+                            <AlertDialogAction
+                              onClick={() => handleDelete(conv.id)}
+                              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                            >
+                              Delete
+                            </AlertDialogAction>
+                          </AlertDialogFooter>
+                        </AlertDialogContent>
+                      </AlertDialog>
+                      
                     </SidebarMenuItem>
                   ))}
                 </SidebarMenu>

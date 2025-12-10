@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from "react";
-import { Send, Loader2, RotateCcw, Sparkles, LogOut } from "lucide-react";
+import { Send, Loader2, RotateCcw, Sparkles, LogOut, ExternalLink } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
@@ -19,9 +19,12 @@ import {
 import { QuickReplyButtons, PREFERENCE_QUESTIONS } from "@/components/QuickReplyButtons";
 import { PreferencesPanel } from "@/components/PreferencesPanel";
 
+// --- UPDATED INTERFACE (Added image/link support) ---
 interface Message {
   role: "user" | "assistant";
   content: string;
+  image?: string;       // ADDED
+  actionLink?: string;  // ADDED
 }
 
 interface QuickReplyState {
@@ -39,7 +42,9 @@ interface ChatInterfaceProps {
 }
 
 const CHAT_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/sg-life-guide`;
+const BOOKING_AGENT_URL = "http://localhost:3001/api/book";
 
+// --- ORIGINAL HELPERS (KEPT INTACT) ---
 const formatUserContext = (user: SingpassUserProfile): string => {
   return `
 USER PROFILE (from Singpass):
@@ -81,7 +86,6 @@ VEHICLE: ${user.vehicleOwnership ? user.vehicleDetails : "Does not own a vehicle
 `.trim();
 };
 
-// Parse markdown links and render as clickable
 const renderTextWithLinks = (text: string): React.ReactNode[] => {
   const linkRegex = /\[([^\]]+)\]\(([^)]+)\)/g;
   const parts: React.ReactNode[] = [];
@@ -124,7 +128,6 @@ const renderTextWithLinks = (text: string): React.ReactNode[] => {
   return parts.length > 0 ? parts : [text];
 };
 
-// Render bold text
 const renderBoldText = (text: string): React.ReactNode[] => {
   const parts = text.split(/\*\*(.*?)\*\*/g);
   return parts.map((part, j) =>
@@ -138,6 +141,7 @@ const renderBoldText = (text: string): React.ReactNode[] => {
   );
 };
 
+// --- MAIN COMPONENT ---
 export const ChatInterface = ({ 
   initialPrompt, 
   conversationId,
@@ -173,18 +177,34 @@ export const ChatInterface = ({
     scrollToBottom();
   }, [messages]);
 
-  // Load saved messages when conversation changes
+  // --- CRITICAL FIX: PRESERVE IMAGES ON SYNC ---
+  // This replaces your original simple sync to stop images from disappearing
   useEffect(() => {
     if (savedMessages && savedMessages.length > 0) {
-      const loadedMessages: Message[] = savedMessages.map((m: DbMessage) => ({
-        role: m.role as "user" | "assistant",
-        content: m.content,
-      }));
-      setMessages(loadedMessages);
+      setMessages((currentMessages) => {
+        // Map DB messages
+        const dbMessages: Message[] = savedMessages.map((m: DbMessage) => ({
+          role: m.role as "user" | "assistant",
+          content: m.content,
+        }));
+
+        // Merge DB with Local to keep Images
+        return dbMessages.map((dbMsg, i) => {
+           const localMsg = currentMessages[i];
+           // If it looks like the same message, preserve the local image/link property
+           if (localMsg && localMsg.role === dbMsg.role && localMsg.content === dbMsg.content) {
+             return { 
+               ...dbMsg, 
+               image: localMsg.image || dbMsg.image,
+               actionLink: localMsg.actionLink || dbMsg.actionLink 
+             };
+           }
+           return dbMsg;
+        });
+      });
     }
   }, [savedMessages]);
 
-  // Update current conversation ID when prop changes
   useEffect(() => {
     setCurrentConversationId(conversationId ?? null);
     if (!conversationId) {
@@ -193,7 +213,6 @@ export const ChatInterface = ({
     }
   }, [conversationId]);
 
-  // Handle initial prompt
   useEffect(() => {
     if (initialPrompt && !hasInitialized.current && !conversationId) {
       hasInitialized.current = true;
@@ -209,10 +228,8 @@ export const ChatInterface = ({
     setInput("");
     setIsLoading(true);
 
-    let assistantContent = "";
     let activeConversationId = currentConversationId;
 
-    // Create new conversation if needed
     if (!activeConversationId) {
       try {
         const title = messageText.slice(0, 50) + (messageText.length > 50 ? "..." : "");
@@ -225,7 +242,6 @@ export const ChatInterface = ({
       }
     }
 
-    // Save user message to database
     if (activeConversationId) {
       try {
         await saveMessage.mutateAsync({
@@ -238,10 +254,55 @@ export const ChatInterface = ({
       }
     }
 
-    // Prepare user context if logged in
+    // --- ADDED: BOOKING LOGIC ---
+    if (messageText.toLowerCase().includes("book") || messageText.toLowerCase().includes("reservation")) {
+      try {
+        setMessages(prev => [...prev, { role: "assistant", content: "🔍 Agent is searching availability..." }]);
+
+        const response = await fetch(BOOKING_AGENT_URL, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ prompt: messageText }),
+        });
+
+        if (!response.ok) throw new Error("Booking Agent Offline");
+
+        const data = await response.json();
+
+        // Update UI with Result (IMAGE + LINK)
+        setMessages((prev) => {
+          const newHistory = prev.slice(0, -1);
+          return [...newHistory, {
+            role: "assistant",
+            content: data.text,
+            image: data.image,      // Image saved to local state
+            actionLink: data.link 
+          }];
+        });
+
+        // Save Text Response to DB (Links included in text for persistence)
+        if (activeConversationId) {
+          const savedContent = data.text + (data.link ? `\n\n[Booking Link](${data.link})` : "");
+          await saveMessage.mutateAsync({
+            conversationId: activeConversationId,
+            role: "assistant",
+            content: savedContent,
+          });
+        }
+      } catch (error) {
+         setMessages(prev => {
+             const base = prev.slice(0, -1);
+             return [...base, { role: "assistant", content: "I'm having trouble connecting to the booking agent." }];
+         });
+      } finally {
+        setIsLoading(false);
+      }
+      return; 
+    }
+    // ----------------------------
+
+    // --- ORIGINAL SUPABASE LOGIC ---
     const userContext = user ? formatUserContext(user) : null;
-    
-    // Add preferences context
     const preferencesContext = preferences ? getPreferencesContext(preferences) : "";
 
     try {
@@ -266,7 +327,6 @@ export const ChatInterface = ({
 
       if (!response.body) throw new Error("No response body");
 
-      // Check for missing preference signal from backend
       const missingPreference = response.headers.get("X-Missing-Preference");
       if (missingPreference && PREFERENCE_QUESTIONS[missingPreference as keyof typeof PREFERENCE_QUESTIONS]) {
         const prefConfig = PREFERENCE_QUESTIONS[missingPreference as keyof typeof PREFERENCE_QUESTIONS];
@@ -281,6 +341,7 @@ export const ChatInterface = ({
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
       let buffer = "";
+      let assistantContent = "";
 
       while (true) {
         const { done, value } = await reader.read();
@@ -322,7 +383,6 @@ export const ChatInterface = ({
         }
       }
 
-      // Save assistant message to database
       if (activeConversationId && assistantContent) {
         try {
           await saveMessage.mutateAsync({
@@ -346,11 +406,9 @@ export const ChatInterface = ({
     }
   };
 
-  // Handle quick reply selection
   const handleQuickReplySelect = async (value: string, label: string) => {
     if (!pendingQuickReply) return;
     
-    // Save the preference
     try {
       await savePreference.mutateAsync({
         key: pendingQuickReply.preferenceKey,
@@ -364,7 +422,6 @@ export const ChatInterface = ({
         description: `Your ${pendingQuickReply.preferenceKey.replace(/_/g, " ")} has been saved.`,
       });
       
-      // Add user's selection as a message for context
       const userResponse = `My ${pendingQuickReply.preferenceKey.replace(/_/g, " ")} is: ${label}`;
       sendMessage(userResponse);
     } catch (error) {
@@ -494,13 +551,32 @@ export const ChatInterface = ({
               ) : (
                 <div className="text-foreground leading-relaxed">
                   {formatMessage(message.content)}
+                  
+                  {/* --- ADDED: IMAGE DISPLAY --- */}
+                  {message.image && (
+                    <div className="mt-4 mb-2 overflow-hidden rounded-lg border border-border shadow-md bg-background">
+                       <img src={message.image} alt="Preview" className="w-full h-auto object-cover max-h-[300px]" />
+                    </div>
+                  )}
+
+                  {/* --- ADDED: BOOKING BUTTON --- */}
+                  {message.actionLink && (
+                    <a 
+                      href={message.actionLink} target="_blank" rel="noreferrer"
+                      className="mt-4 inline-flex w-full items-center justify-center rounded-lg bg-green-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-green-700 transition-colors shadow-sm no-underline"
+                    >
+                      <ExternalLink className="w-4 h-4 mr-2" />
+                      Complete Booking
+                    </a>
+                  )}
+
                 </div>
               )}
             </div>
           </div>
         ))}
         
-        {/* Quick Reply Buttons for preference collection */}
+        {/* Quick Reply Buttons */}
         {pendingQuickReply && !isLoading && (
           <div className="flex justify-start animate-slide-up">
             <div className="max-w-[85%] bg-card border border-border rounded-2xl rounded-bl-sm px-5 py-4 shadow-soft">
@@ -514,12 +590,13 @@ export const ChatInterface = ({
           </div>
         )}
         
+        {/* Loading State */}
         {isLoading && messages[messages.length - 1]?.role === "user" && (
           <div className="flex justify-start animate-slide-up">
             <div className="bg-card border border-border rounded-2xl rounded-bl-sm px-5 py-4 shadow-soft">
               <div className="flex items-center gap-2 text-muted-foreground">
                 <Loader2 className="w-4 h-4 animate-spin" />
-                <span>Searching official sources & generating response...</span>
+                <span>Generating response...</span>
               </div>
             </div>
           </div>
