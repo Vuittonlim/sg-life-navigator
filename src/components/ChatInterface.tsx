@@ -594,7 +594,7 @@ export const ChatInterface = ({
         <div className="flex items-center gap-2">
           <PreferencesPanel />
           {isLoggedIn && (
-            <Button variant="ghost" size="sm" onClick={logout}>
+            <Button variant="ghost" size="sm" onClick={() => { logout(); onReset(); }}>
               <LogOut className="w-4 h-4 mr-2" />
               Logout
             </Button>
