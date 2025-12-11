@@ -140,8 +140,7 @@ export const UserProvider = ({ children }: { children: ReactNode }) => {
   };
 
   const logout = () => {
-    // Clear Singpass session from sessionStorage only
-    // Keep the anonymous Supabase session so chat history persists
+    // Clear from sessionStorage
     sessionStorage.removeItem(SESSION_STORAGE_KEY);
     setUser(null);
   };

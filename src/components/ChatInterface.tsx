@@ -4,7 +4,6 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
 import { useUser, SingpassUserProfile } from "@/contexts/UserContext";
-import { useAuth } from "@/hooks/useAuth";
 import { 
   useConversation, 
   useCreateConversation, 
@@ -208,7 +207,6 @@ export const ChatInterface = ({
   const { toast } = useToast();
   const hasInitialized = useRef(false);
   const { user, isLoggedIn, logout } = useUser();
-  const { isAuthenticated, isLoading: isAuthLoading } = useAuth();
   const [pendingQuickReply, setPendingQuickReply] = useState<QuickReplyState | null>(null);
 
   // Database hooks
@@ -270,7 +268,7 @@ export const ChatInterface = ({
   }, [initialPrompt, conversationId]);
 
   const sendMessage = async (messageText: string) => {
-    if (!messageText.trim() || isLoading || isAuthLoading || !isAuthenticated) return;
+    if (!messageText.trim() || isLoading) return;
 
     const userMessage: Message = { role: "user", content: messageText };
     setMessages((prev) => [...prev, userMessage]);
@@ -596,7 +594,7 @@ export const ChatInterface = ({
         <div className="flex items-center gap-2">
           <PreferencesPanel />
           {isLoggedIn && (
-            <Button variant="ghost" size="sm" onClick={() => { logout(); onReset(); }}>
+            <Button variant="ghost" size="sm" onClick={logout}>
               <LogOut className="w-4 h-4 mr-2" />
               Logout
             </Button>
@@ -709,13 +707,13 @@ export const ChatInterface = ({
             onKeyDown={handleKeyDown}
             placeholder="Ask about any life situation in Singapore..."
             className="min-h-[52px] max-h-32 resize-none rounded-xl border-border focus:border-primary"
-            disabled={isLoading || isAuthLoading}
+            disabled={isLoading}
           />
           <Button
             type="submit"
             size="icon"
             className="h-[52px] w-[52px] rounded-xl shrink-0"
-            disabled={!input.trim() || isLoading || isAuthLoading || !isAuthenticated}
+            disabled={!input.trim() || isLoading}
           >
             {isLoading ? (
               <Loader2 className="w-5 h-5 animate-spin" />

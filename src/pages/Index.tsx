@@ -9,7 +9,6 @@ const Index = () => {
   const [selectedPrompt, setSelectedPrompt] = useState<string | null>(null);
   const [showChat, setShowChat] = useState(false);
   const [selectedConversationId, setSelectedConversationId] = useState<string | null>(null);
-  const [chatKey, setChatKey] = useState(0); // Force remount on new chat
 
   const handleGetStarted = () => {
     setShowChat(true);
@@ -34,7 +33,6 @@ const Index = () => {
   const handleNewChat = () => {
     setSelectedPrompt(null);
     setSelectedConversationId(null);
-    setChatKey(prev => prev + 1); // Force remount
   };
 
   const handleSelectConversation = (id: string | null) => {
@@ -63,7 +61,7 @@ const Index = () => {
               <SidebarTrigger />
             </div>
             <ChatInterface
-              key={selectedConversationId ?? `new-${chatKey}`}
+              key={selectedConversationId ?? "new"}
               initialPrompt={selectedPrompt ?? undefined}
               conversationId={selectedConversationId}
               onConversationCreated={handleConversationCreated}
