@@ -143,6 +143,8 @@ export const UserProvider = ({ children }: { children: ReactNode }) => {
     // Clear from sessionStorage
     sessionStorage.removeItem(SESSION_STORAGE_KEY);
     setUser(null);
+    // Navigate to home page
+    window.location.href = '/';
   };
 
   return (
