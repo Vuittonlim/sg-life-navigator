@@ -610,23 +610,111 @@ You will receive RETRIEVED INFORMATION from trusted sources. You MUST:
 7. **Prioritize official sources** over news and community insights
 8. **Always include at least one official source link** when available`;
 
+// Input validation constants
+const MAX_MESSAGE_LENGTH = 5000;
+const MAX_CONVERSATION_HISTORY = 20;
+const MAX_USER_CONTEXT_LENGTH = 10000;
+const MAX_PREFERENCES_CONTEXT_LENGTH = 5000;
+
+// Sanitize string input - removes potentially dangerous characters
+function sanitizeInput(input: string): string {
+  if (typeof input !== 'string') return '';
+  // Remove null bytes and control characters except newlines/tabs
+  return input
+    .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '')
+    .trim();
+}
+
+// Validate and sanitize message content
+function validateMessage(message: unknown): { valid: boolean; sanitized: string; error?: string } {
+  if (typeof message !== 'string') {
+    return { valid: false, sanitized: '', error: 'Message must be a string' };
+  }
+  
+  const sanitized = sanitizeInput(message);
+  
+  if (sanitized.length === 0) {
+    return { valid: false, sanitized: '', error: 'Message cannot be empty' };
+  }
+  
+  if (sanitized.length > MAX_MESSAGE_LENGTH) {
+    return { valid: false, sanitized: '', error: `Message exceeds maximum length of ${MAX_MESSAGE_LENGTH} characters` };
+  }
+  
+  return { valid: true, sanitized };
+}
+
+// Validate conversation history
+function validateConversationHistory(history: unknown): { role: string; content: string }[] {
+  if (!Array.isArray(history)) return [];
+  
+  return history
+    .slice(-MAX_CONVERSATION_HISTORY) // Keep only recent messages
+    .filter((msg): msg is { role: string; content: string } => 
+      typeof msg === 'object' && 
+      msg !== null &&
+      typeof msg.role === 'string' &&
+      typeof msg.content === 'string' &&
+      ['user', 'assistant', 'system'].includes(msg.role)
+    )
+    .map(msg => ({
+      role: msg.role,
+      content: sanitizeInput(msg.content).slice(0, MAX_MESSAGE_LENGTH)
+    }));
+}
+
 serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
   }
 
   try {
-    const { message, conversationHistory = [], userContext, preferencesContext } = await req.json();
+    // Parse and validate request body
+    let body: Record<string, unknown>;
+    try {
+      body = await req.json();
+    } catch {
+      return new Response(JSON.stringify({ error: "Invalid JSON request body" }), {
+        status: 400,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    const { message, conversationHistory, userContext, preferencesContext } = body;
+    
+    // Validate message
+    const messageValidation = validateMessage(message);
+    if (!messageValidation.valid) {
+      console.log("Message validation failed:", messageValidation.error);
+      return new Response(JSON.stringify({ error: messageValidation.error }), {
+        status: 400,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+    const sanitizedMessage = messageValidation.sanitized;
+    
+    // Validate and sanitize conversation history
+    const validatedHistory = validateConversationHistory(conversationHistory);
+    
+    // Sanitize optional context strings
+    const sanitizedUserContext = typeof userContext === 'string' 
+      ? sanitizeInput(userContext).slice(0, MAX_USER_CONTEXT_LENGTH) 
+      : null;
+    const sanitizedPreferencesContext = typeof preferencesContext === 'string'
+      ? sanitizeInput(preferencesContext).slice(0, MAX_PREFERENCES_CONTEXT_LENGTH)
+      : null;
+    
+    console.log(`Request validated: message=${sanitizedMessage.length}chars, history=${validatedHistory.length}msgs`);
     const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
     
     // Detect missing preferences that could help personalize the response
-    const missingPreference = detectMissingPreferences(message, preferencesContext);
+    const missingPreference = detectMissingPreferences(sanitizedMessage, sanitizedPreferencesContext);
     if (missingPreference) {
       console.log("Missing preference detected:", missingPreference);
     }
     
     // Infer preferences from the user's message
-    const inferredPreferences = inferPreferencesFromMessage(message);
+    const inferredPreferences = inferPreferencesFromMessage(sanitizedMessage);
     if (inferredPreferences.length > 0) {
       console.log("Inferred preferences:", JSON.stringify(inferredPreferences));
     }
@@ -637,11 +725,11 @@ serve(async (req) => {
 
     // Run RAG retrieval and SEA-LION enhancement in parallel
     const [retrievedContext, culturalContext] = await Promise.all([
-      retrieveInformation(message).catch(err => {
+      retrieveInformation(sanitizedMessage).catch(err => {
         console.error("RAG retrieval failed:", err);
         return { official: [], news: [], community: [], business: [] } as RetrievedContext;
       }),
-      enhanceWithSeaLion(message, userContext).catch(err => {
+      enhanceWithSeaLion(sanitizedMessage, sanitizedUserContext).catch(err => {
         console.error("SEA-LION failed:", err);
         return null;
       }),
@@ -664,12 +752,12 @@ serve(async (req) => {
     // Build system prompt with user context, cultural context, and retrieved information
     let finalSystemPrompt = systemPrompt;
     
-    if (userContext) {
+    if (sanitizedUserContext) {
       finalSystemPrompt += `
 
 IMPORTANT: The user has logged in with Singpass and you have access to their verified personal information. Use this context to provide highly personalised advice. Reference their specific situation (age, income, CPF, housing status, etc.) when giving recommendations. Here is their profile:
 
-${userContext}
+${sanitizedUserContext}
 
 When responding:
 - Address them by their first name
@@ -691,8 +779,8 @@ Use these cultural insights to make your advice more relevant and sensitive to l
     }
 
     // Add preferences context if available
-    if (preferencesContext) {
-      finalSystemPrompt += preferencesContext;
+    if (sanitizedPreferencesContext) {
+      finalSystemPrompt += sanitizedPreferencesContext;
     }
 
     // Add retrieved context to system prompt
@@ -700,8 +788,8 @@ Use these cultural insights to make your advice more relevant and sensitive to l
 
     const messages = [
       { role: "system", content: finalSystemPrompt },
-      ...conversationHistory,
-      { role: "user", content: message }
+      ...validatedHistory,
+      { role: "user", content: sanitizedMessage }
     ];
 
     console.log("Sending request to Lovable AI with", messages.length, "messages");
