@@ -1,4 +1,5 @@
 import { createContext, useContext, useState, useEffect, ReactNode } from "react";
+import { supabase } from "@/integrations/supabase/client";
 
 export interface SingpassUserProfile {
   // Personal Info
@@ -139,10 +140,14 @@ export const UserProvider = ({ children }: { children: ReactNode }) => {
     setUser(mockSingpassUser);
   };
 
-  const logout = () => {
+  const logout = async () => {
     // Clear from sessionStorage
     sessionStorage.removeItem(SESSION_STORAGE_KEY);
     setUser(null);
+    
+    // Also sign out from Supabase to get a fresh anonymous session
+    // This ensures chat history is cleared when user logs out
+    await supabase.auth.signOut();
   };
 
   return (
