@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
 import { useUser, SingpassUserProfile } from "@/contexts/UserContext";
+import { supabase } from "@/integrations/supabase/client";
 import { 
   useConversation, 
   useCreateConversation, 
@@ -594,7 +595,14 @@ export const ChatInterface = ({
         <div className="flex items-center gap-2">
           <PreferencesPanel />
           {isLoggedIn && (
-            <Button variant="ghost" size="sm" onClick={logout}>
+            <Button variant="ghost" size="sm" onClick={async () => {
+              // Sign out from Supabase to get a fresh anonymous session
+              await supabase.auth.signOut();
+              // Clear Singpass session
+              logout();
+              // Navigate back to home
+              onReset();
+            }}>
               <LogOut className="w-4 h-4 mr-2" />
               Logout
             </Button>
